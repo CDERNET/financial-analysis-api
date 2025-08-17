@@ -104,8 +104,22 @@ def parse_numeric_value(value: str) -> float:
             return 0.0
     
     try:
-        # Handle Turkish format: . as thousands separator, , as decimal
-        value = value.replace('.', '').replace(',', '.')
-        return float(value)
-    except (ValueError, TypeError):
-        return 0.0
+            if isinstance(value, str):
+                val = value.strip()            
+                if ',' in val and '.' in val:
+                    if val.rfind(',') > val.rfind('.'):
+                        val = val.replace('.', '').replace(',', '.')
+                    else:
+                        val = val.replace(',', '')
+                elif ',' in val:
+                    val = val.replace('.', '').replace(',', '.')
+                else:
+                    val = val.replace(',', '')
+                
+                parsed_value = float(val)
+                return parsed_value
+            else:
+                parsed_value = float(value)
+                return parsed_value
+    except (ValueError, TypeError) as e:
+            return 0.0

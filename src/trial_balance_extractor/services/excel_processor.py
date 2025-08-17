@@ -241,11 +241,24 @@ class ExcelProcessor:
         Returns:
             Parsed float value
         """
+        
         try:
             if isinstance(value, str):
-                # Handle Turkish number format
-                value = value.replace('.', '').replace(',', '.')
-                return float(value)
-            return float(value)
-        except (ValueError, TypeError):
+                val = value.strip()            
+                if ',' in val and '.' in val:
+                    if val.rfind(',') > val.rfind('.'):
+                        val = val.replace('.', '').replace(',', '.')
+                    else:
+                        val = val.replace(',', '')
+                elif ',' in val:
+                    val = val.replace('.', '').replace(',', '.')
+                else:
+                    val = val.replace(',', '')
+                
+                parsed_value = float(val)
+                return parsed_value
+            else:
+                parsed_value = float(value)
+                return parsed_value
+        except (ValueError, TypeError) as e:
             return 0.0
