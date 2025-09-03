@@ -49,7 +49,6 @@ class PDFProcessor:
             HTTPException: If processing fails
         """
         try:
-            logger.info(f"Processing PDF file with headers: {headers}")
             
             # Extract table data from PDF
             df = self._extract_pdf_table_data(file_content, headers)
@@ -65,71 +64,83 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"PDF processing failed: {e}")
             raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
+
+    def _normalize(self, s: str) -> str:
+        if s is None:
+            return ""
+        return (
+            str(s).strip().lower()
+            .replace(".", "")
+            .replace(":", "")
+            .replace(",", "")
+            .replace("ı", "i")
+            .replace("İ", "i")
+        )
+
+    def _find_headers_positions(self, blocks: List[Dict], headers: List[str]) -> Tuple[Dict[str, float], float]:
+        """
+        Sayfadaki header span'larını tüm bloklarda arar, header->X haritasını döndürür.
+        Ayrıca bulunan header'ların en küçük Y'sini 'header_y' olarak verir.
+        En az bir header bulunduysa header_y döner; hiç yoksa ( {}, 40.0 ).
+        """
+        header_positions: Dict[str, float] = {}
+        norm_expected = {self._normalize(h): h for h in headers}
+        found_y_vals = []
+
+        for block in blocks:
+            if block.get("type") != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    txt = span.get("text", "").strip()
+                    txt_norm = self._normalize(txt)
+                    if txt_norm in norm_expected:
+                        original = norm_expected[txt_norm]
+                        # İlk gören kazanır (sağlaması için tekrar yazmıyoruz)
+                        header_positions.setdefault(original, span.get("bbox", [0, 0, 0, 0])[0])
+                        found_y_vals.append(span.get("bbox", [0, 0, 0, 0])[1])
+
+        header_y = min(found_y_vals) if found_y_vals else 40.0
+        return header_positions, header_y
     
     def _extract_pdf_table_data(self, pdf_content: bytes, headers: List[str]) -> pd.DataFrame:
-        """
-        Extract table data from PDF using PyMuPDF.
-        
-        Args:
-            pdf_content: PDF file content
-            headers: Expected column headers
-            
-        Returns:
-            DataFrame with extracted data
-            
-        Raises:
-            Exception: If PDF extraction fails
-        """
         try:
             doc = fitz.open(stream=pdf_content, filetype="pdf")
             all_data_rows = []
-            
+
             for page_num, page in enumerate(doc):
-                logger.info(f"Processing PDF page {page_num + 1}")
-                
-                # Extract text blocks and spans
-                blocks = page.get_text("dict")['blocks']
-                spans = []
-                
-                # Find header row position
-                header_y = self._find_header_position(blocks, headers)
-                if header_y is None:
-                    logger.warning(f"Headers not found on page {page_num + 1}")
+                blocks = page.get_text("dict")["blocks"]
+
+                # 1) Header X konumlarını ve header_y'yi TUM bloklardan çıkar
+                header_positions, header_y = self._find_headers_positions(blocks, headers)
+                if len(header_positions) < len(headers):
+                    logger.warning(f"Not all headers found on page {page_num + 1} {header_positions} {len(headers)}")
+                    # Header'ların bir kısmı bile bulunsa y'yi yine de kullanıp denemek isteyebilirsin,
+                    # ama güvenilir hizalama olmayacağı için sayfayı atlamak daha doğru.
                     continue
-                
-                # Extract text spans below header
+
+                # 2) Header'in ALTINDA kalan metinleri topla
                 spans = self._extract_text_spans(blocks, header_y)
-                
                 if not spans:
                     logger.warning(f"No text spans found on page {page_num + 1}")
                     continue
-                
-                # Find header x-positions for column alignment
-                header_positions = self._get_header_positions(spans, headers)
-                
-                if len(header_positions) < len(headers):
-                    logger.warning(f"Not all headers found on page {page_num + 1}")
-                    continue
-                
-                # Group spans by rows and assign to columns
+
+                # 3) Satır gruplama + en yakın header X konumuna sütun atama
                 page_data = self._group_spans_to_rows(spans, headers, header_positions)
                 all_data_rows.extend(page_data)
-            
+
             doc.close()
-            
+
             if not all_data_rows:
                 logger.warning("No data rows extracted from PDF")
                 return pd.DataFrame()
-            
-            # Create DataFrame
-            df = pd.DataFrame(all_data_rows, columns=headers)
-            logger.info(f"Extracted {len(df)} rows from PDF")
-            return df
-            
+
+            return pd.DataFrame(all_data_rows, columns=headers)
+
         except Exception as e:
             logger.error(f"PDF table extraction failed: {e}")
             raise Exception(f"Failed to extract table from PDF: {e}")
-    
+        
     def _find_header_position(self, blocks: List[Dict], headers: List[str]) -> float:
         """
         Find the Y position of header row in PDF.
@@ -143,13 +154,14 @@ class PDFProcessor:
         """
         for block in blocks:
             if block.get("type") != 0:  # Only text blocks
-                continue
-                
+                continue   
             for line in block.get("lines", []):
+                
                 for span in line.get("spans", []):
                     text = span.get("text", "").strip()
                     if any(text.lower() == header.lower() for header in headers):
-                        return span.get("bbox", [0, 0, 0, 0])[1]  # Y coordinate
+                        y_coordinate = span.get("bbox", [0, 0, 0, 0])[1]
+                        return y_coordinate
         
         # Fallback to a default position
         return 40.0
@@ -195,7 +207,6 @@ class PDFProcessor:
             Dictionary mapping headers to X positions
         """
         header_positions = {}
-        
         for header in headers:
             for span in spans:
                 if span["text"].strip().lower() == header.strip().lower():
@@ -355,7 +366,6 @@ class PDFProcessor:
                 if standard_name in mapping:
                     break
         
-        logger.info(f"PDF column mapping: {mapping}")
         return mapping
     
     def _pdf_dataframe_to_items(
@@ -400,7 +410,6 @@ class PDFProcessor:
                 logger.warning(f"Failed to process PDF row: {e}")
                 continue
         
-        logger.info(f"Converted {len(items)} PDF rows to TrialBalanceItem objects")
         return items
     
     def _parse_numeric(self, value) -> float:
