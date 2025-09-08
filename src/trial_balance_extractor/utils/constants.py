@@ -10,7 +10,7 @@ COLUMN_MAP: Dict[str, List[str]] = {
     ],
     "AccountName": [
         "Hesap Adı", "Adı", "HESAP İSMİ", "hesabı", "Acıklama", 
-        "Açıklama", "Account Name", "Description", "Name"
+        "Açıklama", "Account Name", "Description", "Name","Açiklama","AÇIKLAMA"
     ],
     "Debit": [
         "Borç", "Toplam Borç", "Borç Toplamı", "TL BORÇ", "Borc", 
@@ -26,7 +26,7 @@ COLUMN_MAP: Dict[str, List[str]] = {
     ],
     "CreditBalance": [
         "Alacak Bakiye", "Bakiye Alac.", "TL ALACAK BAKİYE", "Alacakbakıye", 
-        "Bak. Alacak", "BAK. ALACAK", "Credit Balance", "ALACAK BAKİYE"
+        "Bak. Alacak", "BAK. ALACAK", "Credit Balance", "ALACAK BAKİYE","Bakiye Alacak"
     ]
 }
 

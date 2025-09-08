@@ -4,6 +4,8 @@ import logging
 from typing import List, Dict, Any, Tuple
 import fitz  # PyMuPDF
 import pandas as pd
+import re
+import unicodedata
 from fastapi import HTTPException
 
 from ..models.schemas import TrialBalanceItem, ProcessingResult
@@ -15,6 +17,39 @@ from .database_service import DatabaseService
 
 logger = logging.getLogger(__name__)
 
+def _build_reverse_map(column_map: Dict[str, List[str]]) -> Dict[str, str]:
+        """
+        Synonym -> standard_name ters sözlük (normalize edilerek).
+        Aynı synonym iki standarda düşerse ilk görüleni alır
+        (COLUMN_MAP sırası önceliktir).
+        """
+        rev = {}
+        for standard, synonyms in column_map.items():
+            for syn in synonyms:
+                key = _normalize(syn)
+                # Çakışmada ilk gelen kazanır (istenirse uyarı/log eklenebilir)
+                rev.setdefault(key, standard)
+        return rev
+
+def _normalize(s: str) -> str:
+            """
+            Birebir eşleşme için normalize:
+            - unicode normalize (NFKC)
+            - casefold (TR dahil güçlü küçük harf)
+            - noktalama temizle
+            - çoklu boşlukları tek boşluk yap
+            - baş/son boşluk kırp
+            """
+            if s is None:
+                return ""
+            s = str(s)
+            s = unicodedata.normalize("NFKC", s)
+            s = s.casefold()
+            # Noktalama ve sembolleri boşlukla değiştir (Türkçe harfler korunur)
+            s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+            # Çoklu boşluk -> tek boşluk
+            s = re.sub(r"\s+", " ", s, flags=re.UNICODE).strip()
+            return s
 
 class PDFProcessor:
     """Service for processing PDF files with OCR."""
@@ -311,7 +346,7 @@ class PDFProcessor:
         try:
             # Find column mapping
             column_mapping = self._find_column_mapping_pdf(df)
-            
+            logger.info(f"PDF Column mapping: {column_mapping}")
             if 'AccountCode' not in column_mapping:
                 raise HTTPException(status_code=400, detail="Account code column not found in PDF")
             
@@ -344,6 +379,10 @@ class PDFProcessor:
             logger.error(f"PDF DataFrame processing failed: {e}")
             raise HTTPException(status_code=500, detail=f"PDF data processing failed: {e}")
     
+    
+    
+
+
     def _find_column_mapping_pdf(self, df: pd.DataFrame) -> Dict[str, str]:
         """
         Find column mapping for PDF extracted data.
@@ -354,18 +393,17 @@ class PDFProcessor:
         Returns:
             Column mapping dictionary
         """
-        mapping = {}
         
-        for standard_name, synonyms in COLUMN_MAP.items():
-            for column in df.columns:
-                column_lower = str(column).lower().strip()
-                for synonym in synonyms:
-                    if synonym.lower() in column_lower or column_lower in synonym.lower():
-                        mapping[standard_name] = column
-                        break
-                if standard_name in mapping:
-                    break
-        
+        mapping: Dict[str, str] = {}
+        reverse_map = _build_reverse_map(COLUMN_MAP)
+
+        for col in df.columns:
+            norm = _normalize(col)
+            if norm in reverse_map:
+                standard = reverse_map[norm]
+                # Aynı standard iki kere bulunursa ilkini koru
+                mapping.setdefault(standard, col)
+
         return mapping
     
     def _pdf_dataframe_to_items(
@@ -388,7 +426,6 @@ class PDFProcessor:
             List of TrialBalanceItem objects
         """
         items = []
-        
         for _, row in df.iterrows():
             try:
                 item = TrialBalanceItem(
@@ -402,7 +439,7 @@ class PDFProcessor:
                     account_number=account_number,
                     period_id=period_id
                 )
-                
+                logger.info(f"Created PDF TrialBalanceItem: {item}")
                 if item.account_code:
                     items.append(item)
                     
