@@ -106,35 +106,139 @@ class PDFProcessor:
             doc = fitz.open(stream=pdf_content, filetype="pdf")
             all_data_rows = []
 
-            for page_num, page in enumerate(doc):
-                blocks = page.get_text("dict")["blocks"]
+            for page in doc:
+                blocks = page.get_text("dict")['blocks']
+                spans = []
+                header_y = None
+                for block in blocks:
+                    if block.get("type") != 0:
+                        continue
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            text = span.get("text", "").strip()
+                            y = span.get("bbox", [0])[1]
+                            if text in [h for h in headers]:
+                                header_y = y
+                                break
+                        if header_y:
+                            break
+                    if header_y:
+                        break
+                if header_y is None:
+                    header_y = 40  # fallback
 
-                # 1) Header X konumlarını ve header_y'yi TUM bloklardan çıkar
-                header_positions, header_y = self._find_headers_positions(blocks, headers)
-                if len(header_positions) < len(headers):
-                    logger.warning(f"Not all headers found on page {page_num + 1} {header_positions} {len(headers)}")
-                    # Header'ların bir kısmı bile bulunsa y'yi yine de kullanıp denemek isteyebilirsin,
-                    # ama güvenilir hizalama olmayacağı için sayfayı atlamak daha doğru.
+                header_y = header_y - 0.00000000000625
+                logging.debug(f"Header Y: {header_y}")
+                for block in blocks:
+                    if block.get("type") != 0:
+                        continue
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            x = span.get("bbox", [0])[0]
+                            y = span.get("bbox", [0])[1]
+                            text = span.get("text", "").strip()
+                            if text and header_y < y < 780:
+                                spans.append({"x": x, "y": y, "text": text})
+
+                header_x_positions = {}
+                for header in headers:
+                    for span in spans:
+                        if span["text"].strip().lower() == header.strip().lower():
+                            header_x_positions[header] = span["x"]
+                            break
+
+                if len(header_x_positions) < len(headers):
                     continue
 
-                # 2) Header'in ALTINDA kalan metinleri topla
-                spans = self._extract_text_spans(blocks, header_y)
-                if not spans:
-                    logger.warning(f"No text spans found on page {page_num + 1}")
-                    continue
+                spans.sort(key=lambda s: s["y"])
+                grouped_lines = []
+                current_group = []
+                current_y = None
+                tolerance = 5
 
-                # 3) Satır gruplama + en yakın header X konumuna sütun atama
-                page_data = self._group_spans_to_rows(spans, headers, header_positions)
-                all_data_rows.extend(page_data)
+                for span in spans:
+                    if current_y is None:
+                        current_y = span["y"]
+                    if abs(span["y"] - current_y) <= tolerance:
+                        current_group.append(span)
+                    else:
+                        grouped_lines.append(current_group)
+                        current_group = [span]
+                        current_y = span["y"]
+                if current_group:
+                    grouped_lines.append(current_group)
 
-            doc.close()
+                for group in grouped_lines:
+                    if any(span['text'].lower() in [h.lower() for h in headers] for span in group):
+                        continue
 
-            if not all_data_rows:
-                logger.warning("No data rows extracted from PDF")
-                return pd.DataFrame()
+                    group.sort(key=lambda s: s["x"])
+                    span_info = [(s["text"], s["x"], s["y"]) for s in group]
+                    sorted_headers = sorted(header_x_positions.items(), key=lambda kv: kv[1])
+                    col_buckets = {h: [] for h in headers}
 
-            return pd.DataFrame(all_data_rows, columns=headers)
+                    for text, x, y in span_info:
+                        header, header_x = min(sorted_headers, key=lambda h: abs(h[1] - x))
+                        y_conflict_entries = [s for s in col_buckets[header] if abs(s[2] - y) < 1 and abs(s[1] - x) < 100]
 
+                        if y_conflict_entries:
+                            conflict_text, conflict_x, conflict_y = y_conflict_entries[0]
+
+                            other_headers = [(h, abs(hx - x)) for h, hx in sorted_headers if h != header]
+                            if not other_headers:
+                                col_buckets[header].append((text, x, y))
+                                continue
+
+                            alt_header, _ = min(other_headers, key=lambda item: item[1])
+
+                            dist_text_to_header = abs(header_x_positions[header] - x)
+                            dist_text_to_alt = abs(header_x_positions[alt_header] - x)
+                            dist_conflict_to_header = abs(header_x_positions[header] - conflict_x)
+                            dist_conflict_to_alt = abs(header_x_positions[alt_header] - conflict_x)
+
+                            if dist_text_to_header <= dist_text_to_alt:
+                                col_buckets[header].append((text, x, y))
+                                col_buckets[alt_header].append((conflict_text, conflict_x, conflict_y))
+                            else:
+                                col_buckets[alt_header].append((text, x, y))
+                                col_buckets[header].append((conflict_text, conflict_x, conflict_y))
+
+                            col_buckets[header] = [s for s in col_buckets[header] if s != (conflict_text, conflict_x, conflict_y)]
+                        else:
+                            col_buckets[header].append((text, x, y))
+
+                    row_dict = {h: None for h in headers}
+                    for h in headers:
+                        if col_buckets[h]:
+                            spans_h = col_buckets[h]
+                            if len(spans_h) == 1:
+                                row_dict[h] = spans_h[0][0]
+                            else:
+                                sorted_spans = sorted(spans_h, key=lambda s: s[2])
+                                min_y_text = sorted_spans[0][0]
+                                max_y_text = sorted_spans[-1][0]
+                                row_dict[h] = min_y_text if min_y_text == max_y_text else f"{min_y_text} {max_y_text}"
+
+                    # Kod/Açıklama hizalama düzeltmeleri
+                    if len(headers) >= 2:
+                        kod_header = headers[0]
+                        aciklama_header = headers[1]
+                        if not row_dict[kod_header] and row_dict[aciklama_header] and all_data_rows:
+                            prev_row = all_data_rows[-1]
+                            aciklama_index = headers.index(aciklama_header)
+                            prev_row[aciklama_index] = (prev_row[aciklama_index] or "") + " " + row_dict[aciklama_header]
+                            continue
+
+                        if row_dict[aciklama_header] is None and row_dict[kod_header] and " " in row_dict[kod_header]:
+                            parts = row_dict[kod_header].split(" ", 1)  # düzeltildi
+                            if len(parts) == 2:
+                                row_dict[kod_header] = parts[0]
+                                row_dict[aciklama_header] = parts[1]
+
+                    all_data_rows.append([row_dict[h] for h in headers])
+
+            df = pd.DataFrame(all_data_rows, columns=headers)
+            return df
         except Exception as e:
             logger.error(f"PDF table extraction failed: {e}")
             raise Exception(f"Failed to extract table from PDF: {e}")
@@ -337,7 +441,6 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"PDF DataFrame processing failed: {e}")
             raise HTTPException(status_code=500, detail=f"PDF data processing failed: {e}")
-    
     
     def _pdf_dataframe_to_items(
         self,
