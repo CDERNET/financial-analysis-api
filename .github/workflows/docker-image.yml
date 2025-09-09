@@ -21,3 +21,8 @@ jobs:
 
     - name: Push the Docker image
       run: docker push tarzan123/mizanapp:latest
+
+    - name: Wait and trigger deploy
+      run: |
+        sleep 10
+        curl -X GET http://176.96.131.184:3000/api/deploy/q7PsB218KBBhLsOakozWx
