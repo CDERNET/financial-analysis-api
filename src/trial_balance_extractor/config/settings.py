@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # File Processing Configuration
     max_file_size: int = Field(default=50 * 1024 * 1024, env="MAX_FILE_SIZE")  # 50MB
-    allowed_extensions: list[str] = [".xlsx", ".xls", ".csv", ".pdf"]
+    allowed_extensions: list[str] = [".xlsx",".xlsm", ".xls", ".csv", ".pdf"]
     
     # OCR Configuration
     tesseract_lang: str = Field(default="tur", env="TESSERACT_LANG")

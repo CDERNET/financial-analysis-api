@@ -32,7 +32,11 @@ settings = get_settings()
 )
 async def process_excel_file(
     file: UploadFile = File(..., description="Excel, XLS or CSV file containing trial balance data"),
-    account_code_column: str = Form(..., description="Name of the account code column", example="Hesap Kodu"),
+    headers: str = Form(
+        ..., 
+        description="Column headers separated by commas",
+        example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
+    ),
     separator: str = Form(".", description="Account hierarchy separator", example="."),
     account_number: int = Form(..., description="Customer/Account number"),
     period_id: int = Form(..., description="Period identifier")
@@ -42,7 +46,7 @@ async def process_excel_file(
     
     Args:
         file: Uploaded Excel/CSV file
-        account_code_column: Name of account code column
+        headers: Comma-separated column headers
         separator: Account hierarchy separator
         account_number: Customer account number
         period_id: Period identifier
@@ -65,12 +69,22 @@ async def process_excel_file(
         
         # Validate parameters
         validate_account_parameters(account_number, period_id)
+
+         # Parse headers
+        try:
+            header_list = [h.strip() for h in headers.split(",")]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse headers: {e}")
         
+        if not header_list:
+            raise HTTPException(status_code=400, detail="Headers cannot be empty")
+        
+        logger.info(f"Parsed headers: {header_list}")
         # Process file
         result = excel_processor.process_excel_file(
             file_content=file_content,
             filename=file.filename,
-            account_code_column=account_code_column,
+            headers=header_list,
             separator=separator,
             account_number=account_number,
             period_id=period_id

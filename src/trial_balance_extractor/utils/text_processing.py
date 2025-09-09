@@ -2,9 +2,13 @@
 
 import re
 import unicodedata
-from typing import Dict, Optional, Set
+from typing import Optional, Set
 
-
+def normalize_account_code(value: str, separator: str) -> str:
+    if not isinstance(value, str):
+        return value
+    value = value.strip()
+    return value
 def clean_text(text: str) -> str:
     """
     Clean and normalize text by removing extra whitespace and converting to uppercase.
@@ -21,8 +25,6 @@ def clean_text(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = re.sub(r'\s+', '', text)
     return text.upper()
-
-
 def normalize_text(text: str) -> str:
     """
     Normalize text for comparison by handling Turkish characters and formatting.
@@ -52,8 +54,6 @@ def normalize_text(text: str) -> str:
         text = text.replace(turkish_char, english_char)
     
     return text
-
-
 def find_parent_code(code: str, all_codes: Set[str], separator: str) -> Optional[str]:
     """
     Find parent account code by removing the last part of hierarchical code.
@@ -85,41 +85,70 @@ def find_parent_code(code: str, all_codes: Set[str], separator: str) -> Optional
             return candidate
     
     return None
-
-
-def parse_numeric_value(value: str) -> float:
+def parse_numeric_value(value) -> float:
     """
-    Parse numeric value from string, handling Turkish number format.
-    
+    Parse numeric value from string, handling Turkish and English formats.
+
     Args:
-        value: String representation of number
-        
+        value: String or numeric representation of number
+
     Returns:
         Parsed float value, 0.0 if parsing fails
     """
-    if not isinstance(value, str):
+    if value is None:
+        return 0.0
+
+    # Eğer zaten float veya int ise direkt çevir
+    if isinstance(value, (int, float)):
         try:
             return float(value)
         except (ValueError, TypeError):
             return 0.0
-    
+
+    # String ise temizle
     try:
-            if isinstance(value, str):
-                val = value.strip()            
-                if ',' in val and '.' in val:
-                    if val.rfind(',') > val.rfind('.'):
-                        val = val.replace('.', '').replace(',', '.')
-                    else:
-                        val = val.replace(',', '')
-                elif ',' in val:
-                    val = val.replace('.', '').replace(',', '.')
-                else:
-                    val = val.replace(',', '')
-                
-                parsed_value = float(val)
-                return parsed_value
+        val = str(value).strip()
+
+        # Hem . hem , varsa
+        if ',' in val and '.' in val:
+            # Son görünen hangisi → ona göre format seç
+            if val.rfind(',') > val.rfind('.'):
+                # Türkçe format: 1.234,56 → 1234.56
+                val = val.replace('.', '').replace(',', '.')
             else:
-                parsed_value = float(value)
-                return parsed_value
-    except (ValueError, TypeError) as e:
-            return 0.0
+                # İngilizce format: 1,234.56 → 1234.56
+                val = val.replace(',', '')
+        elif ',' in val:
+            # Sadece virgül varsa → nokta yap
+            val = val.replace('.', '').replace(',', '.')
+        else:
+            # Sadece nokta varsa → virgülleri temizle
+            val = val.replace(',', '')
+
+        return float(val)
+    except Exception:
+        return 0.0
+def compute_balances(debit, credit, db_raw=None, cb_raw=None):
+    # Her girdiyi güvenle float'a çeviren yardımcılar
+    def _is_empty(v: object) -> bool:
+        s = str(v).strip().lower()
+        return s == '' or s in ('none', 'null', 'nan')
+    def _to_num_or_none(v: object):
+        if _is_empty(v):
+            return None
+        return parse_numeric_value(v)
+
+    # Debit/Credit'i kesin float'a çek
+    d = parse_numeric_value(debit)
+    c = parse_numeric_value(credit)
+
+    # Gelen bakiye kolonlarını işle
+    db = _to_num_or_none(db_raw)
+    cb = _to_num_or_none(cb_raw)
+
+    # Eğer ikisi de yoksa veya ikisi de 0'sa türet
+    if (db is None and cb is None) or ((db or 0.0) == 0.0 and (cb or 0.0) == 0.0):
+        return max(0.0, d - c), max(0.0, c - d)
+
+    # Aksi halde gelenleri kullan; None olanları 0 kabul et
+    return (db or 0.0), (cb or 0.0)

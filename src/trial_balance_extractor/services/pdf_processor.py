@@ -1,55 +1,18 @@
 """PDF processing service with OCR capabilities."""
 
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Tuple
 import fitz  # PyMuPDF
 import pandas as pd
-import re
-import unicodedata
 from fastapi import HTTPException
 
 from ..models.schemas import TrialBalanceItem, ProcessingResult
-from ..utils import COLUMN_MAP
-from ..utils.text_processing import find_parent_code
+from ..utils.text_processing import compute_balances, find_parent_code, parse_numeric_value
 from .tree_builder import TreeBuilder
 from .database_service import DatabaseService
 
 
 logger = logging.getLogger(__name__)
-
-def _build_reverse_map(column_map: Dict[str, List[str]]) -> Dict[str, str]:
-        """
-        Synonym -> standard_name ters sözlük (normalize edilerek).
-        Aynı synonym iki standarda düşerse ilk görüleni alır
-        (COLUMN_MAP sırası önceliktir).
-        """
-        rev = {}
-        for standard, synonyms in column_map.items():
-            for syn in synonyms:
-                key = _normalize(syn)
-                # Çakışmada ilk gelen kazanır (istenirse uyarı/log eklenebilir)
-                rev.setdefault(key, standard)
-        return rev
-
-def _normalize(s: str) -> str:
-            """
-            Birebir eşleşme için normalize:
-            - unicode normalize (NFKC)
-            - casefold (TR dahil güçlü küçük harf)
-            - noktalama temizle
-            - çoklu boşlukları tek boşluk yap
-            - baş/son boşluk kırp
-            """
-            if s is None:
-                return ""
-            s = str(s)
-            s = unicodedata.normalize("NFKC", s)
-            s = s.casefold()
-            # Noktalama ve sembolleri boşlukla değiştir (Türkçe harfler korunur)
-            s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
-            # Çoklu boşluk -> tek boşluk
-            s = re.sub(r"\s+", " ", s, flags=re.UNICODE).strip()
-            return s
 
 class PDFProcessor:
     """Service for processing PDF files with OCR."""
@@ -92,7 +55,7 @@ class PDFProcessor:
                 raise HTTPException(status_code=400, detail="No table data found in PDF")
             
             # Process the extracted data
-            return self._process_pdf_dataframe(df, separator, account_number, period_id)
+            return self._process_pdf_dataframe(df,headers, separator, account_number, period_id)
             
         except HTTPException:
             raise
@@ -327,6 +290,7 @@ class PDFProcessor:
     def _process_pdf_dataframe(
         self,
         df: pd.DataFrame,
+        headers: List[str],
         separator: str,
         account_number: int,
         period_id: int
@@ -344,14 +308,9 @@ class PDFProcessor:
             Processing result
         """
         try:
-            # Find column mapping
-            column_mapping = self._find_column_mapping_pdf(df)
-            logger.info(f"PDF Column mapping: {column_mapping}")
-            if 'AccountCode' not in column_mapping:
-                raise HTTPException(status_code=400, detail="Account code column not found in PDF")
-            
+           
             # Build parent relationships
-            account_code_col = column_mapping['AccountCode']
+            account_code_col = headers[0]
             df[account_code_col] = df[account_code_col].astype(str).str.strip()
             
             all_codes = set(df[account_code_col].dropna().unique())
@@ -360,7 +319,7 @@ class PDFProcessor:
             )
             
             # Convert to trial balance items
-            items = self._pdf_dataframe_to_items(df, column_mapping, account_number, period_id)
+            items = self._pdf_dataframe_to_items(df, headers, account_number, period_id)
             
             # Insert into database
             inserted_count = self.db_service.insert_trial_balance_items(items)
@@ -380,36 +339,10 @@ class PDFProcessor:
             raise HTTPException(status_code=500, detail=f"PDF data processing failed: {e}")
     
     
-    
-
-
-    def _find_column_mapping_pdf(self, df: pd.DataFrame) -> Dict[str, str]:
-        """
-        Find column mapping for PDF extracted data.
-        
-        Args:
-            df: DataFrame with PDF data
-            
-        Returns:
-            Column mapping dictionary
-        """
-        
-        mapping: Dict[str, str] = {}
-        reverse_map = _build_reverse_map(COLUMN_MAP)
-
-        for col in df.columns:
-            norm = _normalize(col)
-            if norm in reverse_map:
-                standard = reverse_map[norm]
-                # Aynı standard iki kere bulunursa ilkini koru
-                mapping.setdefault(standard, col)
-
-        return mapping
-    
     def _pdf_dataframe_to_items(
         self,
         df: pd.DataFrame,
-        column_mapping: Dict[str, str],
+        headers: List[str],
         account_number: int,
         period_id: int
     ) -> List[TrialBalanceItem]:
@@ -418,7 +351,7 @@ class PDFProcessor:
         
         Args:
             df: Source DataFrame
-            column_mapping: Column mapping
+            headers: list of headers
             account_number: Account number
             period_id: Period ID
             
@@ -428,54 +361,33 @@ class PDFProcessor:
         items = []
         for _, row in df.iterrows():
             try:
+                account_code = str(row.get(headers[0], '')).strip()
+                account_name = str(row.get(headers[1], '')).strip()
+                debit  = parse_numeric_value(row.get(headers[2], 0))
+                credit = parse_numeric_value(row.get(headers[3], 0))
+                if debit == 0 and credit == 0:
+                   continue
+                db_raw = row.get(headers[4], None) if len(headers)>4 else None
+                cb_raw = row.get(headers[5], None) if len(headers)>5 else None 
+                debit_balance, credit_balance = compute_balances(debit, credit, db_raw, cb_raw)
+                logger.info(f"Computed balances for {account_code}: Debit={debit}, Credit={credit}, DB_raw={db_raw}, CB_raw={cb_raw}, Debit Balance={debit_balance}, Credit Balance={credit_balance}")
                 item = TrialBalanceItem(
-                    account_code=str(row.get(column_mapping.get('AccountCode', ''), '')).strip(),
-                    account_name=str(row.get(column_mapping.get('AccountName', ''), '')).strip(),
-                    debit=self._parse_numeric(row.get(column_mapping.get('Debit', ''), 0)),
-                    credit=self._parse_numeric(row.get(column_mapping.get('Credit', ''), 0)),
-                    debit_balance=self._parse_numeric(row.get(column_mapping.get('DebitBalance', ''), 0)),
-                    credit_balance=self._parse_numeric(row.get(column_mapping.get('CreditBalance', ''), 0)),
+                    account_code=account_code,
+                    account_name=account_name,
+                    debit=debit,
+                    credit=credit,
+                    debit_balance=debit_balance,
+                    credit_balance=credit_balance,
                     parent_account_code=row.get('parent_code'),
                     account_number=account_number,
                     period_id=period_id
-                )
-                logger.info(f"Created PDF TrialBalanceItem: {item}")
-                if item.account_code:
+                )              
+                
+                if item.account_code:  # Only add items with valid account codes
                     items.append(item)
-                    
             except Exception as e:
                 logger.warning(f"Failed to process PDF row: {e}")
                 continue
         
         return items
     
-    def _parse_numeric(self, value) -> float:
-        """
-        Parse numeric value from PDF text.
-        
-        Args:
-            value: Value to parse
-            
-        Returns:
-            Parsed float value
-        """
-        try:
-            if isinstance(value, str):
-                val = value.strip()            
-                if ',' in val and '.' in val:
-                    if val.rfind(',') > val.rfind('.'):
-                        val = val.replace('.', '').replace(',', '.')
-                    else:
-                        val = val.replace(',', '')
-                elif ',' in val:
-                    val = val.replace('.', '').replace(',', '.')
-                else:
-                    val = val.replace(',', '')
-                
-                parsed_value = float(val)
-                return parsed_value
-            else:
-                parsed_value = float(value)
-                return parsed_value
-        except (ValueError, TypeError) as e:
-            return 0.0

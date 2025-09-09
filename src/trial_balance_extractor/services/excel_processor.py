@@ -2,19 +2,18 @@
 
 import logging
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import List, Optional
 import pandas as pd
 from fastapi import HTTPException
 
 from ..models.schemas import TrialBalanceItem, ProcessingResult
-from ..utils import COLUMN_MAP, KEYWORDS, clean_text
-from ..utils.text_processing import find_parent_code
+from ..utils import clean_text
+from ..utils.text_processing import compute_balances, find_parent_code, normalize_account_code, parse_numeric_value
 from .tree_builder import TreeBuilder
 from .database_service import DatabaseService
 
 
 logger = logging.getLogger(__name__)
-
 
 class ExcelProcessor:
     """Service for processing Excel and CSV files."""
@@ -28,7 +27,7 @@ class ExcelProcessor:
         self,
         file_content: bytes,
         filename: str,
-        account_code_column: str,
+        headers: List[str],
         separator: str,
         account_number: int,
         period_id: int
@@ -39,7 +38,7 @@ class ExcelProcessor:
         Args:
             file_content: File content as bytes
             filename: Name of the file
-            account_code_column: Name of account code column
+            headers: Comma-separated column headers
             separator: Hierarchy separator
             account_number: Account number
             period_id: Period ID
@@ -51,24 +50,36 @@ class ExcelProcessor:
             HTTPException: If processing fails
         """
         try:
-            logger.info(f"Processing Excel file: {filename}")
             
             # Read Excel file based on extension
-            if filename.lower().endswith('.xlsx'):
+            if filename.lower().endswith('.xlsx') or filename.lower().endswith('.xlsm'):
                 excel_file = pd.ExcelFile(BytesIO(file_content), engine='openpyxl')
             elif filename.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(BytesIO(file_content), engine='xlrd')
             elif filename.lower().endswith('.csv'):
                 df = pd.read_csv(BytesIO(file_content)).fillna('').astype(str)
-                return self._process_dataframe(df, account_code_column, separator, account_number, period_id)
+                return self._process_dataframe(df, headers, separator, account_number, period_id)
             else:
                 raise HTTPException(status_code=400, detail="Unsupported file format")
             
             # Process all sheets in Excel file
+            selected_sheet = None
+            header_row = None
+ 
             for sheet_name in excel_file.sheet_names:
-                logger.info(f"Processing sheet: {sheet_name}")
                 df = excel_file.parse(sheet_name, header=None).fillna('').astype(str)
-                return self._process_dataframe(df, account_code_column, separator, account_number, period_id)
+                row_index = self._find_header_row(df, headers)
+                if row_index is not None:
+                    selected_sheet = sheet_name
+                    header_row = row_index
+                    break
+
+            if not selected_sheet:
+                raise HTTPException(status_code=400, detail="No sheet with matching headers found")
+
+            logger.info(f"Processing selected sheet: {selected_sheet}")
+            df = excel_file.parse(selected_sheet, header=None).fillna('').astype(str)
+            return self._process_dataframe(df, headers, separator, account_number, period_id)
             
         except HTTPException:
             raise
@@ -79,7 +90,7 @@ class ExcelProcessor:
     def _process_dataframe(
         self,
         df: pd.DataFrame,
-        account_code_column: str,
+        headers: List[str],
         separator: str,
         account_number: int,
         period_id: int
@@ -89,7 +100,7 @@ class ExcelProcessor:
         
         Args:
             df: DataFrame to process
-            account_code_column: Name of account code column
+            headers: Comma-separated column headers
             separator: Hierarchy separator
             account_number: Account number
             period_id: Period ID
@@ -101,23 +112,17 @@ class ExcelProcessor:
             HTTPException: If processing fails
         """
         try:
-            # Find header row by looking for keywords
-            header_row = self._find_header_row(df)
-            if header_row is None:
+            
+            header_row_index = self._find_header_row(df,headers)
+            if header_row_index is None:
                 raise HTTPException(status_code=400, detail="No valid header row found in file")
             
             # Set headers and extract data
-            df.columns = df.iloc[header_row]
-            df = df.iloc[header_row + 1:].reset_index(drop=True)
-            
-            # Map columns to standard names
-            column_mapping = self._find_column_mapping(df)
-            if 'AccountCode' not in column_mapping:
-                raise HTTPException(status_code=400, detail="Account code column not found in file")
-            
+            df.columns = df.iloc[header_row_index]
+            df = df.iloc[header_row_index + 1:].reset_index(drop=True)
             # Clean and process data
-            account_code_col = column_mapping['AccountCode']
-            df[account_code_col] = df[account_code_col].astype(str).str.strip()
+            account_code_col = headers[0]
+            df[account_code_col] = df[account_code_col].apply(lambda x: normalize_account_code(x, separator))
             
             # Build parent-child relationships
             all_codes = set(df[account_code_col].dropna().unique())
@@ -126,7 +131,7 @@ class ExcelProcessor:
             )
             
             # Convert to trial balance items
-            items = self._dataframe_to_items(df, column_mapping, account_number, period_id)
+            items = self._dataframe_to_items(df, headers, account_number, period_id)
             
             # Insert into database
             inserted_count = self.db_service.insert_trial_balance_items(items)
@@ -145,51 +150,41 @@ class ExcelProcessor:
             logger.error(f"DataFrame processing failed: {e}")
             raise HTTPException(status_code=500, detail=f"Data processing failed: {e}")
     
-    def _find_header_row(self, df: pd.DataFrame) -> Optional[int]:
+    def _find_header_row(self, df: pd.DataFrame, headers: List[str]) -> Optional[int]:
         """
-        Find the header row by looking for keyword matches.
-        
-        Args:
-            df: DataFrame to search
-            
-        Returns:
-            Row index of header, None if not found
+        Find the header row by looking for matches with provided headers.
         """
+        normalized_headers = [clean_text(h).lower() for h in headers]
+
         for i, row in df.iterrows():
-            normalized = [str(cell).strip().lower() for cell in row]
-            match_count = sum(1 for cell in normalized if cell in [k.lower() for k in KEYWORDS])
-            if match_count >= 3:  # Require at least 3 keyword matches
+            normalized = [clean_text(str(cell)).lower() for cell in row]
+            match_count = sum(1 for cell in normalized if cell in normalized_headers)
+
+            if match_count >= 2:  # eşik: en az 2 header eşleşirse
                 logger.info(f"Found header row at index {i} with {match_count} matches")
                 return i
         return None
-    
-    def _find_column_mapping(self, df: pd.DataFrame) -> Dict[str, str]:
-        """
-        Map DataFrame columns to standard column names.
-        
-        Args:
-            df: DataFrame with columns to map
-            
-        Returns:
-            Dictionary mapping standard names to actual column names
-        """
-        mapping = {}
-        normalized_cols = {clean_text(str(col)): col for col in df.columns}
-        
-        for standard_name, synonyms in COLUMN_MAP.items():
-            for synonym in synonyms:
-                normalized_synonym = clean_text(synonym)
-                if normalized_synonym in normalized_cols:
-                    mapping[standard_name] = normalized_cols[normalized_synonym]
-                    break
-        
-        logger.info(f"Column mapping found: {mapping}")
-        return mapping
-    
+
+    def _is_data_row(self,row, headers):
+        # Tüm hücreler boşsa atla
+        if all((str(cell).strip() == "" or pd.isna(cell)) for cell in row.values):
+            return False
+        # Satırda header anahtar kelimelerinden biri varsa atla
+        if any(str(cell).strip().upper() in [k.upper() for k in headers] for cell in row.values):
+            return False
+        # Satırda en az bir sayısal değer varsa veri olarak kabul et
+        if any(isinstance(cell, (int, float)) and not pd.isna(cell) for cell in row.values):
+            return True
+        # Satırda hesap kodu gibi bir şey varsa veri olarak kabul et (ör: sadece rakam ve boşluk)
+        if any(str(cell).replace(" ", "").isdigit() for cell in row.values):
+            return True
+        # Aksi halde veri değildir
+        return False
+
     def _dataframe_to_items(
         self,
         df: pd.DataFrame,
-        column_mapping: Dict[str, str],
+        headers:List[str],
         account_number: int,
         period_id: int
     ) -> List[TrialBalanceItem]:
@@ -198,7 +193,7 @@ class ExcelProcessor:
         
         Args:
             df: Source DataFrame
-            column_mapping: Column name mapping
+            headers: list of headers
             account_number: Account number
             period_id: Period ID
             
@@ -208,57 +203,42 @@ class ExcelProcessor:
         items = []
         
         for _, row in df.iterrows():
+            # Header satırıysa atla
+            if not self._is_data_row(row, headers):
+                continue
             try:
+               
+                account_code = str(row.get(headers[0], '')).strip()
+                logger.info(f"Processing row: {row.to_dict()} Account Code: {headers[0]} Account name: {headers[1]}")
+                account_name = str(row.get(headers[1], '')).strip()
+                debit  = parse_numeric_value(row.get(headers[2], 0))
+                credit = parse_numeric_value(row.get(headers[3], 0))
+                if debit == 0 and credit == 0:
+                   continue
+                db_raw = row.get(headers[4], None) if len(headers)>4 else None
+                cb_raw = row.get(headers[5], None) if len(headers)>5 else None 
+                debit_balance, credit_balance = compute_balances(debit, credit, db_raw, cb_raw)
                 item = TrialBalanceItem(
-                    account_code=str(row.get(column_mapping.get('AccountCode', ''), '')).strip(),
-                    account_name=str(row.get(column_mapping.get('AccountName', ''), '')).strip(),
-                    debit=self._parse_numeric(row.get(column_mapping.get('Debit', ''), 0)),
-                    credit=self._parse_numeric(row.get(column_mapping.get('Credit', ''), 0)),
-                    debit_balance=self._parse_numeric(row.get(column_mapping.get('DebitBalance', ''), 0)),
-                    credit_balance=self._parse_numeric(row.get(column_mapping.get('CreditBalance', ''), 0)),
+                    account_code=account_code,
+                    account_name=account_name,
+                    debit=debit,
+                    credit=credit,
+                    debit_balance=debit_balance,
+                    credit_balance=credit_balance,
                     parent_account_code=row.get('parent_code'),
                     account_number=account_number,
                     period_id=period_id
-                )
+                )              
                 
                 if item.account_code:  # Only add items with valid account codes
                     items.append(item)
                     
             except Exception as e:
-                logger.warning(f"Failed to process row: {e}")
+                logger.warning(f"Failed to process row: {e} - Row data: {row.to_dict()}")
                 continue
         
         logger.info(f"Converted {len(items)} rows to TrialBalanceItem objects")
         return items
-    
-    def _parse_numeric(self, value) -> float:
-        """
-        Parse numeric value handling different formats.
+   
+
         
-        Args:
-            value: Value to parse
-            
-        Returns:
-            Parsed float value
-        """
-        
-        try:
-            if isinstance(value, str):
-                val = value.strip()            
-                if ',' in val and '.' in val:
-                    if val.rfind(',') > val.rfind('.'):
-                        val = val.replace('.', '').replace(',', '.')
-                    else:
-                        val = val.replace(',', '')
-                elif ',' in val:
-                    val = val.replace('.', '').replace(',', '.')
-                else:
-                    val = val.replace(',', '')
-                
-                parsed_value = float(val)
-                return parsed_value
-            else:
-                parsed_value = float(value)
-                return parsed_value
-        except (ValueError, TypeError) as e:
-            return 0.0
