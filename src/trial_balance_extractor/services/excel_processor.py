@@ -4,6 +4,7 @@ import logging
 from io import BytesIO
 from typing import List, Optional
 import pandas as pd
+import re
 from fastapi import HTTPException
 
 from ..models.schemas import TrialBalanceItem, ProcessingResult
@@ -119,11 +120,12 @@ class ExcelProcessor:
             
             # Set headers and extract data
             df.columns = df.iloc[header_row_index]
+            df.columns = [re.sub(r"\s+", " ", c).strip() for c in df.columns]
             df = df.iloc[header_row_index + 1:].reset_index(drop=True)
             # Clean and process data
             account_code_col = headers[0]
+            logger.info(f"Using account code column: {df.columns.tolist()}")
             df[account_code_col] = df[account_code_col].apply(lambda x: normalize_account_code(x, separator))
-            
             # Build parent-child relationships
             all_codes = set(df[account_code_col].dropna().unique())
             df['parent_code'] = df[account_code_col].apply(
