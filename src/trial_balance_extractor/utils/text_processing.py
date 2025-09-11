@@ -152,3 +152,4 @@ def compute_balances(debit, credit, db_raw=None, cb_raw=None):
 
     # Aksi halde gelenleri kullan; None olanları 0 kabul et
     return (db or 0.0), (cb or 0.0)
+

@@ -128,6 +128,7 @@ class ExcelProcessor:
             df[account_code_col] = df[account_code_col].apply(lambda x: normalize_account_code(x, separator))
             # Build parent-child relationships
             all_codes = set(df[account_code_col].dropna().unique())
+            logger.info(f"Total unique account codes found: {len(all_codes)}")
             df['parent_code'] = df[account_code_col].apply(
                 lambda x: find_parent_code(x, all_codes, separator)
             )
@@ -166,21 +167,38 @@ class ExcelProcessor:
                 logger.info(f"Found header row at index {i} with {match_count} matches")
                 return i
         return None
+    def _is_number_like(self,value) -> bool:
+        """Hücre değeri sayı mı? (int, float veya string-sayı)"""
+        if pd.isna(value):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        text = str(value).strip()
+        if text == "":
+            return False
+        try:
+            float(text.replace(".", "").replace(",", "."))  # 1.234,56 veya 1234.56 formatlarını da yakalar
+            return True
+        except ValueError:
+            return False
+
 
     def _is_data_row(self,row, headers):
+        
         # Tüm hücreler boşsa atla
-        if all((str(cell).strip() == "" or pd.isna(cell)) for cell in row.values):
+        if all((str(cell).strip() == "" or pd.isna(cell)) for cell in row.values): 
             return False
-        # Satırda header anahtar kelimelerinden biri varsa atla
-        if any(str(cell).strip().upper() in [k.upper() for k in headers] for cell in row.values):
+        # Satırda header anahtar kelimelerinden en az 2 tane varsa atla
+        header_set = {str(h).strip().upper() for h in headers if pd.notna(h)}
+        header_hits = sum(str(cell).strip().upper() in header_set for cell in row.values if str(cell).strip() != "")
+
+        if header_hits >= 2: 
             return False
         # Satırda en az bir sayısal değer varsa veri olarak kabul et
-        if any(isinstance(cell, (int, float)) and not pd.isna(cell) for cell in row.values):
+        if any(self._is_number_like(cell) for cell in row.values):
             return True
-        # Satırda hesap kodu gibi bir şey varsa veri olarak kabul et (ör: sadece rakam ve boşluk)
-        if any(str(cell).replace(" ", "").isdigit() for cell in row.values):
-            return True
-        # Aksi halde veri değildir
+        
+        # Aksi halde veri değildir 
         return False
 
     def _dataframe_to_items(
@@ -203,20 +221,20 @@ class ExcelProcessor:
             List of TrialBalanceItem objects
         """
         items = []
-        
+        is_data_row_count = 0
+        total_df_rows = len(df)
         for _, row in df.iterrows():
             # Header satırıysa atla
             if not self._is_data_row(row, headers):
+                is_data_row_count += 1
+                logger.info(f"Skipping non-data row: {row.to_dict()}")
                 continue
             try:
                
                 account_code = str(row.get(headers[0], '')).strip()
-                logger.info(f"Processing row: {row.to_dict()} Account Code: {headers[0]} Account name: {headers[1]}")
                 account_name = str(row.get(headers[1], '')).strip()
                 debit  = parse_numeric_value(row.get(headers[2], 0))
                 credit = parse_numeric_value(row.get(headers[3], 0))
-                if debit == 0 and credit == 0:
-                   continue
                 db_raw = row.get(headers[4], None) if len(headers)>4 else None
                 cb_raw = row.get(headers[5], None) if len(headers)>5 else None 
                 debit_balance, credit_balance = compute_balances(debit, credit, db_raw, cb_raw)
@@ -234,12 +252,28 @@ class ExcelProcessor:
                 
                 if item.account_code:  # Only add items with valid account codes
                     items.append(item)
+                else:
+                 is_data_row_count += 1
+ 
                     
             except Exception as e:
-                logger.warning(f"Failed to process row: {e} - Row data: {row.to_dict()}")
+                logger.error(f"Failed to process row: {e} - Row data: {row.to_dict()}")
                 continue
         
-        logger.info(f"Converted {len(items)} rows to TrialBalanceItem objects")
+        
+        calculated_total = is_data_row_count + len(items)  # data rows + skipped empty
+        if calculated_total != total_df_rows:
+                raise ValueError(
+                    f"Row count mismatch! Total: {total_df_rows} rows, "
+                    f"Skipped: {is_data_row_count} rows ,"
+                    f"Converted: {len(items)} rows,"
+                    f"(Skipped+Converted:{calculated_total})."
+                )
+
+        logger.info(
+                f"Converted {len(items)} rows to TrialBalanceItem objects "
+                f"(skipped {is_data_row_count} data rows."
+            )
         return items
    
 

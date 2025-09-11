@@ -20,8 +20,8 @@ def setup_logging():
     settings = get_settings()
     
     logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper()),
-        format=settings.log_format,
+        level= logging.INFO,#getattr(logging, settings.log_level.upper()),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",#settings.log_format,
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler("trial_balance_extractor.log", mode="a", encoding="utf-8")
@@ -29,9 +29,10 @@ def setup_logging():
     )
     
     # Set specific loggers
+    logging.getLogger("uvicorn").setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
-
+     
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
