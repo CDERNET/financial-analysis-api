@@ -1,6 +1,10 @@
 """PDF processing service with OCR capabilities."""
 
 import logging
+import re
+import unicodedata
+
+
 from typing import List, Dict, Tuple
 import fitz  # PyMuPDF
 import pandas as pd
@@ -13,6 +17,7 @@ from .database_service import DatabaseService
 
 
 logger = logging.getLogger(__name__)
+NUMERIC_RE = r"""^\s*[\(\-]?\d{1,3}(?:[.\s,]\d{3})*(?:[.,]\d+)?[%₺$€]?\)?\s*$"""
 
 class PDFProcessor:
     """Service for processing PDF files with OCR."""
@@ -22,6 +27,7 @@ class PDFProcessor:
         self.tree_builder = TreeBuilder()
         self.db_service = DatabaseService()
     
+   
     def process_pdf_file(
         self,
         file_content: bytes,
@@ -101,296 +107,185 @@ class PDFProcessor:
         header_y = min(found_y_vals) if found_y_vals else 40.0
         return header_positions, header_y
     
+    #-------------------------yardımcılar
+    def _norm(self,s: str) -> str:
+        """
+        Başlık ismi normalizasyonu: Türkçe karakterleri ASCII'ye çeker, boşluk/noktalama atar, üst-case.
+        Örn: 'Hesap Adı' -> 'HESAPADI', 'Borç Toplamı' -> 'BORCTOPLAMI'
+        """
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+        s = re.sub(r"\s+", "", s)
+        s = re.sub(r"[^\w]", "", s)
+        return s.upper()
+    def _assign_to_zone(self,span: Dict, zones: List[Dict]) -> str:
+        """
+        Numeric: x1'e en yakın R sınırı olan zonu seç (x1 >= L - küçük bir tolerans ile).
+        Text: mevcut L-R kapsama / merkeze yakın kuralı.
+        """
+        x0, x1 = span["x0"], span["x1"]
+        txt = span["text"]
+
+        if self._is_numeric(txt):
+            tol = 6.0  # küçük bir tolerans: başlık sınırına çok yakın taşmaları yakalar
+            viable = [z for z in zones if x1 >= z["L"] - tol]
+            if not viable:
+                viable = zones
+            chosen = min(viable, key=lambda z: abs(x1 - z["R"]))
+            return chosen["name"]
+
+        # metinler için eski mantık
+        p = (x0 + x1) / 2
+        for z in zones:
+            if z["L"] <= p <= z["R"]:
+                return z["name"]
+        nearest = min(zones, key=lambda z: abs(p - (z["L"] + z["R"]) / 2))
+        return nearest["name"]
+    def _group_rows(self,spans: List[Dict], y_tol: float = 5.0):
+        """
+        spans: [{x0,x1,y0,y1,text}]
+        y_mid ile satır gruplama. y_tol = 5.0 -> font/ölçek için güvenli.
+        """
+        sorted_spans = sorted(spans, key=lambda s: (((s["y0"] + s["y1"]) / 2), s["x0"]))
+        rows = []
+        current = None
+        for s in sorted_spans:
+            y_mid = (s["y0"] + s["y1"]) / 2
+            if current is None or abs(current["y_mid"] - y_mid) > y_tol:
+                current = {"y_mid": y_mid, "cells": [s]}
+                rows.append(current)
+            else:
+                current["cells"].append(s)
+        return rows  
+    def _is_numeric(self,text: str) -> bool:
+        t = text.strip().replace("\u00A0", " ")
+        if any(ch.isalpha() for ch in t):
+            return False
+        return re.match(NUMERIC_RE, t) is not None
+    def _build_zones(self,header_boxes: List[Dict], padding: float = 6.0):
+        """
+        header_boxes: [{name, x0, x1, y0, y1}]
+        return: [{name, L, R, center}]
+        """
+        headers_sorted = sorted(header_boxes, key=lambda h: ((h["x0"] + h["x1"]) / 2, h["x0"]))
+        centers = [(h["x0"] + h["x1"]) / 2 for h in headers_sorted]
+        min_left = min(h["x0"] for h in headers_sorted) - padding
+        max_right = max(h["x1"] for h in headers_sorted) + padding
+
+        zones = []
+        for i, h in enumerate(headers_sorted):
+            L = (centers[i - 1] + centers[i]) / 2 if i > 0 else min_left
+            R = (centers[i] + centers[i + 1]) / 2 if i < len(headers_sorted) - 1 else max_right
+            zones.append({"name": h["name"], "L": L, "R": R, "center": centers[i]})
+        return zones
+
+    #--------------------------------Yardımcılar sonu
     def _extract_pdf_table_data(self, pdf_content: bytes, headers: List[str]) -> pd.DataFrame:
+        """
+        Sağ kenarı esas alan numeric kararı ve header merkezlerinden çıkan kolon bölgeleriyle
+        veriyi doğru başlık altına atar. headers: endpoint'ten gelen hedef başlık sırası.
+        """
         try:
             doc = fitz.open(stream=pdf_content, filetype="pdf")
-            all_data_rows = []
-
+            all_rows = []
+           
+            # Hedef başlıkları ve normalize hallerini tut
+            header_order = [h.strip() for h in headers]
+            norm_targets = {self._norm(h): h for h in header_order}
+            target_norm_set = set(norm_targets.keys())
             for page in doc:
-                blocks = page.get_text("dict")['blocks']
-                spans = []
-                header_y = None
+                page_dict = page.get_text("dict")
+                blocks = page_dict.get("blocks", [])
+
+                # 1) Header span'larını bul (bbox) — normalize ederek karşılaştır
+                header_boxes: List[Dict] = []
+                header_y_top = None  # header satırının üst y0'ı
+
                 for block in blocks:
                     if block.get("type") != 0:
                         continue
                     for line in block.get("lines", []):
                         for span in line.get("spans", []):
-                            text = span.get("text", "").strip()
-                            y = span.get("bbox", [0])[1]
-                            if text in [h for h in headers]:
-                                header_y = y
-                                break
-                        if header_y:
-                            break
-                    if header_y:
-                        break
-                if header_y is None:
-                    header_y = 40  # fallback
+                            txt = span.get("text", "").strip()
+                            if not txt:
+                                continue
+                            n = self._norm(txt)
+                            if n in target_norm_set:
+                                x0, y0, x1, y1 = span["bbox"]
+                                header_boxes.append({"name": norm_targets[n], "x0": x0, "x1": x1, "y0": y0, "y1": y1})
+                                header_y_top = y0 if header_y_top is None else min(header_y_top, y0)
 
-                header_y = header_y - 0.00000000000625
-                logging.debug(f"Header Y: {header_y}")
-                for block in blocks:
-                    if block.get("type") != 0:
-                        continue
-                    for line in block.get("lines", []):
-                        for span in line.get("spans", []):
-                            x = span.get("bbox", [0])[0]
-                            y = span.get("bbox", [0])[1]
-                            text = span.get("text", "").strip()
-                            if text and header_y < y < 780:
-                                spans.append({"x": x, "y": y, "text": text})
-
-                header_x_positions = {}
-                for header in headers:
-                    for span in spans:
-                        if span["text"].strip().lower() == header.strip().lower():
-                            header_x_positions[header] = span["x"]
-                            break
-
-                if len(header_x_positions) < len(headers):
+                # Eğer hiçbir header bulunamazsa sayfayı atla
+                if not header_boxes:
+                    logging.debug("Sayfada hedef başlık bulunamadı, atlandı.")
                     continue
 
-                spans.sort(key=lambda s: s["y"])
-                grouped_lines = []
-                current_group = []
-                current_y = None
-                tolerance = 5
+                # 2) Kolon bölgelerini üret
+                zones = self._build_zones(header_boxes, padding=6.0)
 
-                for span in spans:
-                    if current_y is None:
-                        current_y = span["y"]
-                    if abs(span["y"] - current_y) <= tolerance:
-                        current_group.append(span)
-                    else:
-                        grouped_lines.append(current_group)
-                        current_group = [span]
-                        current_y = span["y"]
-                if current_group:
-                    grouped_lines.append(current_group)
+                # Zone -> hedef başlık adı (zaten header_boxes name'i hedef adı)
+                zone_to_header = {z["name"]: z["name"] for z in zones}
 
-                for group in grouped_lines:
-                    if any(span['text'].lower() in [h.lower() for h in headers] for span in group):
+                # 3) Veri span’larını topla (header satırının altı)
+                if header_y_top is None:
+                    header_y_top = 40.0  # fallback
+                usable_spans = []
+                page_bottom = page.rect.br.y
+                for block in blocks:
+                    if block.get("type") != 0:
                         continue
-
-                    group.sort(key=lambda s: s["x"])
-                    span_info = [(s["text"], s["x"], s["y"]) for s in group]
-                    sorted_headers = sorted(header_x_positions.items(), key=lambda kv: kv[1])
-                    col_buckets = {h: [] for h in headers}
-
-                    for text, x, y in span_info:
-                        header, header_x = min(sorted_headers, key=lambda h: abs(h[1] - x))
-                        y_conflict_entries = [s for s in col_buckets[header] if abs(s[2] - y) < 1 and abs(s[1] - x) < 100]
-
-                        if y_conflict_entries:
-                            conflict_text, conflict_x, conflict_y = y_conflict_entries[0]
-
-                            other_headers = [(h, abs(hx - x)) for h, hx in sorted_headers if h != header]
-                            if not other_headers:
-                                col_buckets[header].append((text, x, y))
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            txt = span.get("text", "").strip()
+                            if not txt:
                                 continue
+                            x0, y0, x1, y1 = span["bbox"]
+                            if (y0 > header_y_top) and (y0 < (page_bottom - 5)):  # header altı
+                                usable_spans.append({"x0": x0, "x1": x1, "y0": y0, "y1": y1, "text": txt})
 
-                            alt_header, _ = min(other_headers, key=lambda item: item[1])
+                # 4) Header satırlarını veri olarak alma
+                lower_headers = {h.lower() for h in header_order}
+                usable_spans = [s for s in usable_spans if s["text"].strip().lower() not in lower_headers]
 
-                            dist_text_to_header = abs(header_x_positions[header] - x)
-                            dist_text_to_alt = abs(header_x_positions[alt_header] - x)
-                            dist_conflict_to_header = abs(header_x_positions[header] - conflict_x)
-                            dist_conflict_to_alt = abs(header_x_positions[alt_header] - conflict_x)
+                # 5) Satırlara grupla
+                rows = self._group_rows(usable_spans, y_tol=5.0)
 
-                            if dist_text_to_header <= dist_text_to_alt:
-                                col_buckets[header].append((text, x, y))
-                                col_buckets[alt_header].append((conflict_text, conflict_x, conflict_y))
-                            else:
-                                col_buckets[alt_header].append((text, x, y))
-                                col_buckets[header].append((conflict_text, conflict_x, conflict_y))
+                # 6) Her satır için kolon ataması
+                for r in rows:
+                    col_texts = {h: [] for h in header_order}
+                    for s in r["cells"]:
+                        zone_name = self._assign_to_zone(s, zones)  # sayfadaki header adı
+                        target_header = zone_to_header.get(zone_name, zone_name)
+                        if target_header in col_texts:
+                            col_texts[target_header].append(s["text"].strip())
 
-                            col_buckets[header] = [s for s in col_buckets[header] if s != (conflict_text, conflict_x, conflict_y)]
-                        else:
-                            col_buckets[header].append((text, x, y))
+                    # Çok parçalı metinleri birleştir (aynı kolonda)
+                    row_out = [(" ".join(col_texts[h])).strip() if col_texts[h] else None for h in header_order]
 
-                    row_dict = {h: None for h in headers}
-                    for h in headers:
-                        if col_buckets[h]:
-                            spans_h = col_buckets[h]
-                            if len(spans_h) == 1:
-                                row_dict[h] = spans_h[0][0]
-                            else:
-                                sorted_spans = sorted(spans_h, key=lambda s: s[2])
-                                min_y_text = sorted_spans[0][0]
-                                max_y_text = sorted_spans[-1][0]
-                                row_dict[h] = min_y_text if min_y_text == max_y_text else f"{min_y_text} {max_y_text}"
-
-                    # Kod/Açıklama hizalama düzeltmeleri
-                    if len(headers) >= 2:
-                        kod_header = headers[0]
-                        aciklama_header = headers[1]
-                        if not row_dict[kod_header] and row_dict[aciklama_header] and all_data_rows:
-                            prev_row = all_data_rows[-1]
-                            aciklama_index = headers.index(aciklama_header)
-                            prev_row[aciklama_index] = (prev_row[aciklama_index] or "") + " " + row_dict[aciklama_header]
+                    # Opsiyonel: "Kod/Açıklama" yapışması düzeltmesi (ilk iki kolon için)
+                    if len(header_order) >= 2:
+                        kod_idx, ack_idx = 0, 1
+                        # Açıklama var, kod yok ve önceki satır varsa -> açıklamayı üst satıra ekle (satır kırılması)
+                        if (row_out[kod_idx] is None) and (row_out[ack_idx]) and all_rows:
+                            all_rows[-1][ack_idx] = ((all_rows[-1][ack_idx] or "") + " " + row_out[ack_idx]).strip()
                             continue
-
-                        if row_dict[aciklama_header] is None and row_dict[kod_header] and " " in row_dict[kod_header]:
-                            parts = row_dict[kod_header].split(" ", 1)  # düzeltildi
+                        # Kod dolu, açıklama boş; kod içinde boşlukla ayrılmışsa -> böl
+                        if (row_out[ack_idx] is None) and (row_out[kod_idx]) and (" " in row_out[kod_idx]):
+                            parts = row_out[kod_idx].split(" ", 1)
                             if len(parts) == 2:
-                                row_dict[kod_header] = parts[0]
-                                row_dict[aciklama_header] = parts[1]
+                                row_out[kod_idx] = parts[0].strip()
+                                row_out[ack_idx] = parts[1].strip()
 
-                    all_data_rows.append([row_dict[h] for h in headers])
-
-            df = pd.DataFrame(all_data_rows, columns=headers)
+                    all_rows.append(row_out)
+              
+            df = pd.DataFrame(all_rows, columns=headers)
             return df
         except Exception as e:
             logger.error(f"PDF table extraction failed: {e}")
             raise Exception(f"Failed to extract table from PDF: {e}")
         
-    def _find_header_position(self, blocks: List[Dict], headers: List[str]) -> float:
-        """
-        Find the Y position of header row in PDF.
-        
-        Args:
-            blocks: Text blocks from PDF
-            headers: Expected headers
-            
-        Returns:
-            Y position of header row, None if not found
-        """
-        for block in blocks:
-            if block.get("type") != 0:  # Only text blocks
-                continue   
-            for line in block.get("lines", []):
-                
-                for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
-                    if any(text.lower() == header.lower() for header in headers):
-                        y_coordinate = span.get("bbox", [0, 0, 0, 0])[1]
-                        return y_coordinate
-        
-        # Fallback to a default position
-        return 40.0
-    
-    def _extract_text_spans(self, blocks: List[Dict], header_y: float) -> List[Dict]:
-        """
-        Extract text spans from PDF blocks below header position.
-        
-        Args:
-            blocks: Text blocks from PDF
-            header_y: Y position of header
-            
-        Returns:
-            List of text span dictionaries
-        """
-        spans = []
-        
-        for block in blocks:
-            if block.get("type") != 0:  # Only text blocks
-                continue
-                
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    x = span.get("bbox", [0])[0]
-                    y = span.get("bbox", [0])[1]
-                    text = span.get("text", "").strip()
-                    
-                    # Only include spans below header and above page bottom
-                    if text and header_y < y < 780:
-                        spans.append({"x": x, "y": y, "text": text})
-        
-        return spans
-    
-    def _get_header_positions(self, spans: List[Dict], headers: List[str]) -> Dict[str, float]:
-        """
-        Get X positions for each header.
-        
-        Args:
-            spans: Text spans from PDF
-            headers: Expected headers
-            
-        Returns:
-            Dictionary mapping headers to X positions
-        """
-        header_positions = {}
-        for header in headers:
-            for span in spans:
-                if span["text"].strip().lower() == header.strip().lower():
-                    header_positions[header] = span["x"]
-                    break
-        
-        return header_positions
-    
-    def _group_spans_to_rows(
-        self, 
-        spans: List[Dict], 
-        headers: List[str], 
-        header_positions: Dict[str, float]
-    ) -> List[List[str]]:
-        """
-        Group text spans into rows and assign to columns.
-        
-        Args:
-            spans: Text spans from PDF
-            headers: Column headers
-            header_positions: X positions of headers
-            
-        Returns:
-            List of data rows
-        """
-        # Sort spans by Y position (row) then X position (column)
-        spans.sort(key=lambda s: s["y"])
-        
-        # Group spans by Y position (same row)
-        grouped_lines = []
-        current_group = []
-        current_y = None
-        tolerance = 5  # Y position tolerance for same row
-        
-        for span in spans:
-            if current_y is None:
-                current_y = span["y"]
-                
-            if abs(span["y"] - current_y) <= tolerance:
-                current_group.append(span)
-            else:
-                if current_group:
-                    grouped_lines.append(current_group)
-                current_group = [span]
-                current_y = span["y"]
-        
-        if current_group:
-            grouped_lines.append(current_group)
-        
-        # Process each row group
-        data_rows = []
-        
-        for group in grouped_lines:
-            # Skip if this group contains header text
-            if any(span['text'].lower() in [h.lower() for h in headers] for span in group):
-                continue
-            
-            # Sort group by X position
-            group.sort(key=lambda s: s["x"])
-            
-            # Assign spans to columns based on X position proximity to headers
-            row_data = {header: "" for header in headers}
-            
-            for span in group:
-                # Find closest header by X position
-                closest_header = min(
-                    header_positions.items(),
-                    key=lambda item: abs(item[1] - span["x"])
-                )[0]
-                
-                # Concatenate text if multiple spans map to same column
-                if row_data[closest_header]:
-                    row_data[closest_header] += " " + span["text"]
-                else:
-                    row_data[closest_header] = span["text"]
-            
-            # Convert to list in header order
-            row_list = [row_data.get(header, "") for header in headers]
-            data_rows.append(row_list)
-        
-        return data_rows
-    
+   
+ 
+
     def _process_pdf_dataframe(
         self,
         df: pd.DataFrame,
