@@ -182,25 +182,104 @@ class ExcelProcessor:
         except ValueError:
             return False
 
+    # Satırın veri satırı olup olmadığını kontrol et 
+   
 
-    def _is_data_row(self,row, headers):
-        
-        # Tüm hücreler boşsa atla
-        if all((str(cell).strip() == "" or pd.isna(cell)) for cell in row.values): 
-            return False
-        # Satırda header anahtar kelimelerinden en az 2 tane varsa atla
-        header_set = {str(h).strip().upper() for h in headers if pd.notna(h)}
-        header_hits = sum(str(cell).strip().upper() in header_set for cell in row.values if str(cell).strip() != "")
+    # --- Yardımcı: Hücre temizleme (NBSP, fazla boşluk vs.) ---
+   
+    # --- Temizleme ---
+    def _clean_cell(self, v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        s = str(v).replace("\xa0", " ").strip()
+        return re.sub(r"\s+", " ", s)
 
-        if header_hits >= 2: 
+    def _is_number_like(self, value) -> bool:
+        t = self._clean_cell(value)
+        if t == "":
             return False
-        # Satırda en az bir sayısal değer varsa veri olarak kabul et
-        if any(self._is_number_like(cell) for cell in row.values):
+        try:
+            float(t.replace(" ", "").replace(".", "").replace(",", "."))
             return True
-        
-        # Aksi halde veri değildir 
+        except ValueError:
+            return False
+
+    def _is_date_like(self, value) -> bool:
+        return bool(re.fullmatch(r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}", self._clean_cell(value)))
+
+    # --- Sadece TAM başlık hücresi eşleşmesi meta sayılır ---
+    def _is_meta_label(self, text: str) -> bool:
+        txt = self._clean_cell(text).lower()
+        exact = {
+            "hesap kodu","hesap adı","borç (tl)","alacak (tl)",
+            "bakiye borç (tl)","bakiye alacak (tl)",
+            "borç","alacak","bakiye borç","bakiye alacak",
+            "mizan dönemi","tarihler arası mizan","sayfa no","sayı no","tarih","rapor"
+        }
+        cand = txt.rstrip(":").strip()
+        return txt in exact or cand in exact
+
+    # --- Satır bazında sayfa başlığı var mı? ---
+    def _row_has_page_header(self, row) -> bool:
+        joined = " ".join(self._clean_cell(v).lower() for v in row.values)
+        return bool(re.search(r"\bsayfa\s*no\b|\bpage\s*no\b", joined))
+
+    # --- Esnek hesap kodu ---
+    def _looks_like_account_code(self, text: str) -> bool:
+        s = self._clean_cell(text)
+        if s == "" or self._is_meta_label(s) or self._is_date_like(s):
+            return False
+        if len(s) > 50 or len(s.split()) > 5:
+            return False
+        # Tamamı harfse kısa kod şartı (firma/unvanı ele)
+        if not any(ch.isdigit() for ch in s):
+            if len(s) > 12 or len(s.split()) > 2:
+                return False
+        return True
+
+    # --- Veri satırı tespiti ---
+    def _is_data_row(self, row, headers):
+        # Tamamen boşsa
+        if all(self._clean_cell(v) == "" for v in row.values):
+            return False
+
+        # Sayfa başlığı olan satırı ayıkla (Sayfa No : 8 gibi)
+        if self._row_has_page_header(row):
+            return False
+
+        # Satır baştan sona header hücrelerinden oluşuyorsa
+        non_empty = [self._clean_cell(v) for v in row.values if self._clean_cell(v) != ""]
+        if non_empty and all(self._is_meta_label(v) for v in non_empty):
+            return False
+
+        # Aynı satırda 2+ header hücresi varsa (başlık tekrarı)
+        header_set = {self._clean_cell(h).upper() for h in headers if pd.notna(h)}
+        header_hits = sum(self._clean_cell(c).upper() in header_set
+                          for c in row.values if self._clean_cell(c) != "")
+        if header_hits >= 2:
+            return False
+
+        # Hesap kodu kontrolü
+        acc_code_col = headers[0]
+        if not self._looks_like_account_code(row.get(acc_code_col, "")):
+            return False
+
+        # Hesap adı meta olmasın
+        if len(headers) > 1 and headers[1] in row.index:
+            if self._is_meta_label(row.get(headers[1], "")):
+                return False
+
+        # En az bir tutar kolonu numerik (BORÇ/ALACAK/BAKİYE) — tarih sayılmasın
+        amount_cols = [h for h in headers[2:6] if h in row.index]
+        for col in amount_cols:
+            val = self._clean_cell(row.get(col, ""))
+            if self._is_number_like(val) and not self._is_date_like(val):
+                return True
         return False
 
+    #----
+
+  
     def _dataframe_to_items(
         self,
         df: pd.DataFrame,
