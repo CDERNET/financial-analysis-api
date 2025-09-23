@@ -4,7 +4,7 @@ import logging
 import fitz  # PyMuPDF
 import pandas as pd
 from fastapi import HTTPException
-from typing import List
+from typing import List, Optional
 from ..models.schemas import TrialBalanceItem, ProcessingResult
 from ..utils.text_processing import compute_balances, find_parent_code, parse_numeric_value
 from .tree_builder import TreeBuilder
@@ -290,8 +290,8 @@ class PDFProcessor:
         self,
         df: pd.DataFrame,
         headers:List[str],
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> List[TrialBalanceItem]:
         """
         Convert DataFrame to TrialBalanceItem objects.
@@ -332,8 +332,8 @@ class PDFProcessor:
                     debit_balance=debit_balance,
                     credit_balance=credit_balance,
                     parent_account_code=row.get('parent_code'),
-                    account_number=account_number,
-                    period_id=period_id
+                    account_number=account_number if account_number is not None else 0,
+                    period_id=period_id if period_id is not None else 0
                 )              
                 
                 if item.account_code:  # Only add items with valid account codes
@@ -367,8 +367,8 @@ class PDFProcessor:
         file_content: bytes,
         headers: List[str],
         separator: str,
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> ProcessingResult:
         """
         Process PDF file and extract trial balance data without saving to database.
@@ -377,8 +377,8 @@ class PDFProcessor:
             file_content: PDF file content as bytes
             headers: List of column headers to extract
             separator: Account hierarchy separator
-            account_number: Account number
-            period_id: Period ID
+            account_number: Account number (optional for preview)
+            period_id: Period ID (optional for preview)
             
         Returns:
             Processing result with extracted data (without database insertion)
@@ -408,8 +408,8 @@ class PDFProcessor:
         df: pd.DataFrame,
         headers: List[str],
         separator: str,
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> ProcessingResult:
         """
         Process extracted PDF DataFrame without saving to database.
@@ -443,8 +443,8 @@ class PDFProcessor:
                 success=True,
                 message=f"Successfully processed PDF with {len(items)} records (no database save)",
                 inserted_count=0,  # No database insertion
-                account_number=account_number,
-                period_id=period_id,
+                account_number=account_number if account_number is not None else 0,
+                period_id=period_id if period_id is not None else 0,
                 data=[item.model_dump() for item in items]  # Include the processed data in response
             )
             

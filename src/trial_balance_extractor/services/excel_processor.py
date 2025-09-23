@@ -284,8 +284,8 @@ class ExcelProcessor:
         self,
         df: pd.DataFrame,
         headers:List[str],
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> List[TrialBalanceItem]:
         """
         Convert DataFrame to TrialBalanceItem objects.
@@ -293,8 +293,8 @@ class ExcelProcessor:
         Args:
             df: Source DataFrame
             headers: list of headers
-            account_number: Account number
-            period_id: Period ID
+            account_number: Account number (optional)
+            period_id: Period ID (optional)
             
         Returns:
             List of TrialBalanceItem objects
@@ -325,8 +325,8 @@ class ExcelProcessor:
                     debit_balance=debit_balance,
                     credit_balance=credit_balance,
                     parent_account_code=row.get('parent_code'),
-                    account_number=account_number,
-                    period_id=period_id
+                    account_number=account_number if account_number is not None else 0,
+                    period_id=period_id if period_id is not None else 0
                 )              
                 
                 if item.account_code:  # Only add items with valid account codes
@@ -361,8 +361,8 @@ class ExcelProcessor:
         filename: str,
         headers: List[str],
         separator: str,
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> ProcessingResult:
         """
         Process Excel file and extract trial balance data without saving to database.
@@ -372,8 +372,8 @@ class ExcelProcessor:
             filename: Name of the file
             headers: Comma-separated column headers
             separator: Hierarchy separator
-            account_number: Account number
-            period_id: Period ID
+            account_number: Account number (optional for preview)
+            period_id: Period ID (optional for preview)
             
         Returns:
             Processing result with extracted data (without database insertion)
@@ -424,8 +424,8 @@ class ExcelProcessor:
         df: pd.DataFrame,
         headers: List[str],
         separator: str,
-        account_number: int,
-        period_id: int
+        account_number: Optional[int] = None,
+        period_id: Optional[int] = None
     ) -> ProcessingResult:
         """
         Process DataFrame to extract trial balance data without saving to database.
@@ -472,8 +472,8 @@ class ExcelProcessor:
                 success=True,
                 message=f"Successfully processed {len(items)} records (no database save)",
                 inserted_count=0,  # No database insertion
-                account_number=account_number,
-                period_id=period_id,
+                account_number=account_number if account_number is not None else 0,
+                period_id=period_id if period_id is not None else 0,
                 data=[item.model_dump() for item in items]  # Include the processed data in response
             )
             

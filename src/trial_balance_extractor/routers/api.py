@@ -184,7 +184,7 @@ async def process_pdf_file(
 @router.post(
     "/excel/preview",
     response_model=ProcessingResult,
-    summary="Preview Excel file data without saving to database",
+    summary="Preview Excel file data without saving to database.",
     description="Upload Excel, XLS, or CSV file to extract and preview trial balance data without storing in database"
 )
 async def preview_excel_file(
@@ -195,8 +195,8 @@ async def preview_excel_file(
         example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
     ),
     separator: str = Form(".", description="Account hierarchy separator", example="."),
-    account_number: int = Form(..., description="Customer/Account number"),
-    period_id: int = Form(..., description="Period identifier")
+    account_number: str = Form("", description="Customer/Account number (optional for preview)"),
+    period_id: str = Form("", description="Period identifier (optional for preview)")
 ) -> ProcessingResult:
     """
     Preview Excel file data without saving to database.
@@ -205,8 +205,8 @@ async def preview_excel_file(
         file: Uploaded Excel/CSV file
         headers: Comma-separated column headers
         separator: Account hierarchy separator
-        account_number: Customer account number
-        period_id: Period identifier
+        account_number: Customer account number (optional for preview)
+        period_id: Period identifier (optional for preview)
         
     Returns:
         Processing result with extracted data (no database save)
@@ -224,8 +224,25 @@ async def preview_excel_file(
         file_content = await file.read()
         validate_file_size(len(file_content), settings.max_file_size)
         
-        # Validate parameters
-        validate_account_parameters(account_number, period_id)
+        # Parse optional parameters
+        parsed_account_number = None
+        parsed_period_id = None
+        
+        if account_number and account_number.strip():
+            try:
+                parsed_account_number = int(account_number.strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid account_number format")
+        
+        if period_id and period_id.strip():
+            try:
+                parsed_period_id = int(period_id.strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid period_id format")
+        
+        # Validate parameters only if provided
+        if parsed_account_number is not None and parsed_period_id is not None:
+            validate_account_parameters(parsed_account_number, parsed_period_id)
 
          # Parse headers
         try:
@@ -243,8 +260,8 @@ async def preview_excel_file(
             filename=file.filename,
             headers=header_list,
             separator=separator,
-            account_number=account_number,
-            period_id=period_id
+            account_number=parsed_account_number,
+            period_id=parsed_period_id
         )
         
         end_time = datetime.now()
@@ -274,8 +291,8 @@ async def preview_pdf_file(
         example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
     ),
     separator: str = Form(".", description="Account hierarchy separator", example="."),
-    account_number: int = Form(..., description="Customer/Account number"),
-    period_id: int = Form(..., description="Period identifier")
+    account_number: str = Form("", description="Customer/Account number (optional for preview)"),
+    period_id: str = Form("", description="Period identifier (optional for preview)")
 ) -> ProcessingResult:
     """
     Preview PDF file data without saving to database.
@@ -284,8 +301,8 @@ async def preview_pdf_file(
         file: Uploaded PDF file
         headers: Comma-separated column headers
         separator: Account hierarchy separator
-        account_number: Customer account number
-        period_id: Period identifier
+        account_number: Customer account number (optional for preview)
+        period_id: Period identifier (optional for preview)
         
     Returns:
         Processing result with extracted data (no database save)
@@ -313,16 +330,33 @@ async def preview_pdf_file(
         if not header_list:
             raise HTTPException(status_code=400, detail="Headers cannot be empty")
         
-        # Validate parameters
-        validate_account_parameters(account_number, period_id)
+        # Parse optional parameters
+        parsed_account_number = None
+        parsed_period_id = None
+        
+        if account_number and account_number.strip():
+            try:
+                parsed_account_number = int(account_number.strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid account_number format")
+        
+        if period_id and period_id.strip():
+            try:
+                parsed_period_id = int(period_id.strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid period_id format")
+        
+        # Validate parameters only if provided
+        if parsed_account_number is not None and parsed_period_id is not None:
+            validate_account_parameters(parsed_account_number, parsed_period_id)
         
         # Process file without saving
         result = pdf_processor.process_pdf_file_no_save(
             file_content=file_content,
             headers=header_list,
             separator=separator,
-            account_number=account_number,
-            period_id=period_id
+            account_number=parsed_account_number,
+            period_id=parsed_period_id
         )
         
         end_time = datetime.now()
