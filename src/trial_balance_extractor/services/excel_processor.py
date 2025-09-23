@@ -354,6 +354,134 @@ class ExcelProcessor:
                 f"(skipped {is_data_row_count} data rows."
             )
         return items
+
+    def process_excel_file_no_save(
+        self,
+        file_content: bytes,
+        filename: str,
+        headers: List[str],
+        separator: str,
+        account_number: int,
+        period_id: int
+    ) -> ProcessingResult:
+        """
+        Process Excel file and extract trial balance data without saving to database.
+        
+        Args:
+            file_content: File content as bytes
+            filename: Name of the file
+            headers: Comma-separated column headers
+            separator: Hierarchy separator
+            account_number: Account number
+            period_id: Period ID
+            
+        Returns:
+            Processing result with extracted data (without database insertion)
+            
+        Raises:
+            HTTPException: If processing fails
+        """
+        try:
+            
+            # Read Excel file based on extension
+            if filename.lower().endswith('.xlsx') or filename.lower().endswith('.xlsm'):
+                excel_file = pd.ExcelFile(BytesIO(file_content), engine='openpyxl')
+            elif filename.lower().endswith('.xls'):
+                excel_file = pd.ExcelFile(BytesIO(file_content), engine='xlrd')
+            elif filename.lower().endswith('.csv'):
+                df = pd.read_csv(BytesIO(file_content)).fillna('').astype(str)
+                return self._process_dataframe_no_save(df, headers, separator, account_number, period_id)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported file format")
+            
+            # Process all sheets in Excel file
+            selected_sheet = None
+            header_row = None
+ 
+            for sheet_name in excel_file.sheet_names:
+                df = excel_file.parse(sheet_name, header=None).fillna('').astype(str)
+                row_index = self._find_header_row(df, headers)
+                if row_index is not None:
+                    selected_sheet = sheet_name
+                    header_row = row_index
+                    break
+
+            if not selected_sheet:
+                raise HTTPException(status_code=400, detail="No sheet with matching headers found")
+
+            logger.info(f"Processing selected sheet: {selected_sheet}")
+            df = excel_file.parse(selected_sheet, header=None).fillna('').astype(str)
+            return self._process_dataframe_no_save(df, headers, separator, account_number, period_id)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Excel processing failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Excel processing failed: {e}")
+
+    def _process_dataframe_no_save(
+        self,
+        df: pd.DataFrame,
+        headers: List[str],
+        separator: str,
+        account_number: int,
+        period_id: int
+    ) -> ProcessingResult:
+        """
+        Process DataFrame to extract trial balance data without saving to database.
+        
+        Args:
+            df: DataFrame to process
+            headers: Comma-separated column headers
+            separator: Hierarchy separator
+            account_number: Account number
+            period_id: Period ID
+            
+        Returns:
+            Processing result with extracted data (without database insertion)
+            
+        Raises:
+            HTTPException: If processing fails
+        """
+        try:
+            
+            header_row_index = self._find_header_row(df,headers)
+            if header_row_index is None:
+                raise HTTPException(status_code=400, detail="No valid header row found in file")
+            
+            # Set headers and extract data
+            df.columns = df.iloc[header_row_index]
+            df.columns = [re.sub(r"\s+", " ", c).strip() for c in df.columns]
+            df = df.iloc[header_row_index + 1:].reset_index(drop=True)
+            # Clean and process data
+            account_code_col = headers[0]
+            logger.info(f"Using account code column: {df.columns.tolist()}")
+            df[account_code_col] = df[account_code_col].apply(lambda x: normalize_account_code(x, separator))
+            # Build parent-child relationships
+            all_codes = set(df[account_code_col].dropna().unique())
+            logger.info(f"Total unique account codes found: {len(all_codes)}")
+            df['parent_code'] = df[account_code_col].apply(
+                lambda x: find_parent_code(x, all_codes, separator)
+            )
+            
+            # Convert to trial balance items
+            items = self._dataframe_to_items(df, headers, account_number, period_id)
+            
+            # Return result without database insertion
+            return ProcessingResult(
+                success=True,
+                message=f"Successfully processed {len(items)} records (no database save)",
+                inserted_count=0,  # No database insertion
+                account_number=account_number,
+                period_id=period_id,
+                data=[item.model_dump() for item in items]  # Include the processed data in response
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"DataFrame processing failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Data processing failed: {e}")
    
 
         

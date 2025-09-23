@@ -361,4 +361,96 @@ class PDFProcessor:
                 f"(skipped {is_data_row_count} data rows."
             )
         return items
+
+    def process_pdf_file_no_save(
+        self,
+        file_content: bytes,
+        headers: List[str],
+        separator: str,
+        account_number: int,
+        period_id: int
+    ) -> ProcessingResult:
+        """
+        Process PDF file and extract trial balance data without saving to database.
+        
+        Args:
+            file_content: PDF file content as bytes
+            headers: List of column headers to extract
+            separator: Account hierarchy separator
+            account_number: Account number
+            period_id: Period ID
+            
+        Returns:
+            Processing result with extracted data (without database insertion)
+            
+        Raises:
+            HTTPException: If processing fails
+        """
+        try:
+            
+            # Extract table data from PDF
+            df = self.extract_pdf_data(file_content, headers)
+            
+            if df.empty:
+                raise HTTPException(status_code=400, detail="No table data found in PDF")
+            
+            # Process the extracted data
+            return self._process_pdf_dataframe_no_save(df, headers, separator, account_number, period_id)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"PDF processing failed: {e}")
+            raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
+
+    def _process_pdf_dataframe_no_save(
+        self,
+        df: pd.DataFrame,
+        headers: List[str],
+        separator: str,
+        account_number: int,
+        period_id: int
+    ) -> ProcessingResult:
+        """
+        Process extracted PDF DataFrame without saving to database.
+        
+        Args:
+            df: Extracted DataFrame
+            headers: List of column headers
+            separator: Account hierarchy separator
+            account_number: Account number
+            period_id: Period ID
+            
+        Returns:
+            Processing result with extracted data (without database insertion)
+        """
+        try:
+           
+            # Build parent relationships
+            account_code_col = headers[0]
+            df[account_code_col] = df[account_code_col].astype(str).str.strip()
+            
+            all_codes = set(df[account_code_col].dropna().unique())
+            df['parent_code'] = df[account_code_col].apply(
+                lambda x: find_parent_code(x, all_codes, separator)
+            )
+            
+            # Convert to trial balance items
+            items = self._dataframe_to_items(df, headers, account_number, period_id)
+            
+            # Return result without database insertion
+            return ProcessingResult(
+                success=True,
+                message=f"Successfully processed PDF with {len(items)} records (no database save)",
+                inserted_count=0,  # No database insertion
+                account_number=account_number,
+                period_id=period_id,
+                data=[item.model_dump() for item in items]  # Include the processed data in response
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"PDF DataFrame processing failed: {e}")
+            raise HTTPException(status_code=500, detail=f"PDF data processing failed: {e}")
    

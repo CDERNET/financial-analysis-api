@@ -181,6 +181,163 @@ async def process_pdf_file(
         raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
 
 
+@router.post(
+    "/excel/preview",
+    response_model=ProcessingResult,
+    summary="Preview Excel file data without saving to database",
+    description="Upload Excel, XLS, or CSV file to extract and preview trial balance data without storing in database"
+)
+async def preview_excel_file(
+    file: UploadFile = File(..., description="Excel, XLS or CSV file containing trial balance data"),
+    headers: str = Form(
+        ..., 
+        description="Column headers separated by commas",
+        example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
+    ),
+    separator: str = Form(".", description="Account hierarchy separator", example="."),
+    account_number: int = Form(..., description="Customer/Account number"),
+    period_id: int = Form(..., description="Period identifier")
+) -> ProcessingResult:
+    """
+    Preview Excel file data without saving to database.
+    
+    Args:
+        file: Uploaded Excel/CSV file
+        headers: Comma-separated column headers
+        separator: Account hierarchy separator
+        account_number: Customer account number
+        period_id: Period identifier
+        
+    Returns:
+        Processing result with extracted data (no database save)
+        
+    Raises:
+        HTTPException: If processing fails
+    """
+    start_time = datetime.now()
+    logger.info(f"Excel preview processing started at {start_time}")
+    
+    try:
+        # Validate file
+        validate_file_extension(file.filename, settings.allowed_extensions)
+        
+        file_content = await file.read()
+        validate_file_size(len(file_content), settings.max_file_size)
+        
+        # Validate parameters
+        validate_account_parameters(account_number, period_id)
+
+         # Parse headers
+        try:
+            header_list = [h.strip() for h in headers.split(",")]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse headers: {e}")
+        
+        if not header_list:
+            raise HTTPException(status_code=400, detail="Headers cannot be empty")
+        
+        logger.info(f"Parsed headers: {header_list}")
+        # Process file without saving
+        result = excel_processor.process_excel_file_no_save(
+            file_content=file_content,
+            filename=file.filename,
+            headers=header_list,
+            separator=separator,
+            account_number=account_number,
+            period_id=period_id
+        )
+        
+        end_time = datetime.now()
+        elapsed_time = (end_time - start_time).total_seconds()
+        logger.info(f"Excel preview processing completed in {elapsed_time:.2f} seconds")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel preview processing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Excel preview processing failed: {e}")
+
+
+@router.post(
+    "/pdf/preview",
+    response_model=ProcessingResult, 
+    summary="Preview PDF file data without saving to database",
+    description="Upload PDF file to extract and preview trial balance data using OCR without storing in database"
+)
+async def preview_pdf_file(
+    file: UploadFile = File(..., description="PDF file containing trial balance data"),
+    headers: str = Form(
+        ..., 
+        description="Column headers separated by commas",
+        example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
+    ),
+    separator: str = Form(".", description="Account hierarchy separator", example="."),
+    account_number: int = Form(..., description="Customer/Account number"),
+    period_id: int = Form(..., description="Period identifier")
+) -> ProcessingResult:
+    """
+    Preview PDF file data without saving to database.
+    
+    Args:
+        file: Uploaded PDF file
+        headers: Comma-separated column headers
+        separator: Account hierarchy separator
+        account_number: Customer account number
+        period_id: Period identifier
+        
+    Returns:
+        Processing result with extracted data (no database save)
+        
+    Raises:
+        HTTPException: If processing fails
+    """
+    start_time = datetime.now()
+    logger.info(f"PDF preview processing started at {start_time}")
+    
+    try:
+        # Validate file
+        if not file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
+        file_content = await file.read()
+        validate_file_size(len(file_content), settings.max_file_size)
+        
+        # Parse headers
+        try:
+            header_list = [h.strip() for h in headers.split(",")]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse headers: {e}")
+        
+        if not header_list:
+            raise HTTPException(status_code=400, detail="Headers cannot be empty")
+        
+        # Validate parameters
+        validate_account_parameters(account_number, period_id)
+        
+        # Process file without saving
+        result = pdf_processor.process_pdf_file_no_save(
+            file_content=file_content,
+            headers=header_list,
+            separator=separator,
+            account_number=account_number,
+            period_id=period_id
+        )
+        
+        end_time = datetime.now()
+        elapsed_time = (end_time - start_time).total_seconds()
+        logger.info(f"PDF preview processing completed in {elapsed_time:.2f} seconds")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF preview processing error: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF preview processing failed: {e}")
+
+
 @router.get(
     "/account-tree",
     response_model=AccountTreeResponse,

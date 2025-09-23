@@ -63,6 +63,7 @@ class ProcessingResult(BaseModel):
     account_number: Optional[int] = Field(None, description="Account number processed")
     period_id: Optional[int] = Field(None, description="Period ID processed")
     errors: List[str] = Field(default_factory=list, description="Processing errors")
+    data: Optional[List[Dict[str, Any]]] = Field(None, description="Processed data (when not saved to database)")
 
 
 class FileUploadRequest(BaseModel):
