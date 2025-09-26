@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trial-balance-service
+  labels:
+    app: trial-balance-extractor
+spec:
+  type: LoadBalancer  # External access or ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: trial-balance-extractor

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trial-balance-extractor
+  labels:
+    app: trial-balance-extractor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trial-balance-extractor
+  template:
+    metadata:
+      labels:
+        app: trial-balance-extractor
+    spec:
+      containers:
+      - name: trial-balance-extractor
+        image: your-registry.com/trial-balance-extractor:latest  # CHANGE THIS!
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        # API configuration
+        - name: API_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: API_HOST
+        - name: API_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: API_PORT
+        # File processing configuration
+        - name: MAX_FILE_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: MAX_FILE_SIZE
+        - name: TESSERACT_LANG
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: TESSERACT_LANG
+        - name: PDF_DPI
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: PDF_DPI
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: trial-balance-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
