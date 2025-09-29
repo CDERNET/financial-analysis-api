@@ -17,9 +17,6 @@ pytesseract>=0.3.10
 openpyxl>=3.1.2
 xlrd>=2.0.1
 
-# Database
-pyodbc>=5.0.1
-
 # Configuration and validation  
 pydantic>=2.5.0
 pydantic-settings>=2.1.0

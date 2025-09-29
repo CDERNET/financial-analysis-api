@@ -46,12 +46,12 @@ async def lifespan(app: FastAPI):
     logger = logging.getLogger(__name__)
     logger.info("Starting Trial Balance Extractor API...")
     
-    # Test database connection
+    # Test data directory access
     db_service = DatabaseService()
     if db_service.check_connection():
-        logger.info("Database connection successful")
+        logger.info("Data directory access successful")
     else:
-        logger.warning("Database connection failed - some features may not work")
+        logger.warning("Data directory access failed - some features may not work")
     
     yield
     

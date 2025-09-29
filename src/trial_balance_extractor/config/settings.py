@@ -10,12 +10,8 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
-    # Database Configuration
-    db_server: str = Field(default="mssql", env="DB_SERVER")
-    db_database: str = Field(default="MizanDB", env="DB_DATABASE")
-    db_username: str = Field(default="sa", env="DB_USERNAME")
-    db_password: str = Field(default="Password123!", env="DB_PASSWORD")
-    db_driver: str = Field(default="{ODBC Driver 18 for SQL Server}", env="DB_DRIVER")
+    # Data Storage Configuration  
+    data_directory: str = Field(default="data", env="DATA_DIRECTORY")
     
     # API Configuration
     api_title: str = "Trial Balance Extractor API"
@@ -39,17 +35,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        
-    def get_database_url(self) -> str:
-        """Construct database connection string."""
-        return (
-            f"DRIVER={self.db_driver};"
-            f"SERVER={self.db_server};"
-            f"DATABASE={self.db_database};"
-            f"UID={self.db_username};"
-            f"PWD={self.db_password};"
-            f"TrustServerCertificate=yes;"
-        )
+
 
 
 @lru_cache()

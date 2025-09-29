@@ -11,7 +11,7 @@ A professional FastAPI application for extracting trial balance data from PDF an
 - **Multi-format Support**: Process Excel (.xlsx, .xls), CSV, and PDF files
 - **OCR Processing**: Extract data from PDF documents using PyMuPDF and Tesseract
 - **Hierarchical Trees**: Build parent-child account relationships automatically
-- **Database Integration**: Store processed data in Microsoft SQL Server
+- **File-based Storage**: Store processed data in JSON files
 - **RESTful API**: FastAPI with automatic Swagger documentation
 - **Turkish Language Support**: Handle Turkish characters and number formats
 - **Docker Support**: Containerized deployment with Docker Compose
@@ -63,7 +63,7 @@ trial_balance_extractor/
 ### Prerequisites
 
 - Python 3.10 or higher
-- Microsoft SQL Server (or Docker for containerized deployment)
+- Docker (for containerized deployment - optional)
 - Tesseract OCR (for PDF processing)
 
 ### Installation
@@ -86,12 +86,9 @@ trial_balance_extractor/
    ```
 
 4. **Configure environment:**
-   Create a `.env` file with your database settings:
+   Create a `.env` file with your storage settings:
    ```env
-   DB_SERVER=localhost
-   DB_DATABASE=MizanDB
-   DB_USERNAME=sa
-   DB_PASSWORD=your_password
+   DATA_DIRECTORY=data
    API_HOST=0.0.0.0
    API_PORT=8000
    LOG_LEVEL=INFO
@@ -154,10 +151,7 @@ The application supports configuration through environment variables or `.env` f
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_SERVER` | `mssql` | Database server hostname |
-| `DB_DATABASE` | `MizanDB` | Database name |
-| `DB_USERNAME` | `sa` | Database username |
-| `DB_PASSWORD` | `Password123!` | Database password |
+| `DATA_DIRECTORY` | `data` | Directory for data storage |
 | `API_HOST` | `0.0.0.0` | API host address |
 | `API_PORT` | `8000` | API port number |
 | `LOG_LEVEL` | `INFO` | Logging level |
