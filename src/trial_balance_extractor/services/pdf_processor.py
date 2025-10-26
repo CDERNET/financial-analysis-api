@@ -186,11 +186,46 @@ class PDFProcessor:
 
                 group.sort(key=lambda s: s["x"])
                 span_info = [(s["text"], s["x"], s["y"]) for s in group]
+                # sütun başlıklarını X'e göre sırala
                 sorted_headers = sorted(header_x_positions.items(), key=lambda kv: kv[1])
                 col_buckets = {h: [] for h in headers}
 
+                # sütun sınırlarını hesapla (başlık X'leri arasındaki orta noktalar)
+                header_positions = [hx for (_, hx) in sorted_headers]
+                header_names_in_order = [h for (h, _) in sorted_headers]
+                boundaries = []
+                for i in range(len(header_positions) - 1):
+                    mid = (header_positions[i] + header_positions[i + 1]) / 2.0
+                    boundaries.append(mid)
+                # boundaries: len = n_headers - 1, use -inf..b0, b0..b1, ..., b_{n-2}..+inf
+
+                def assign_header_by_x(x_val):
+                    # hangi aralıkta olduğunu bul
+                    for idx, b in enumerate(boundaries):
+                        if x_val <= b:
+                            return header_names_in_order[idx], header_x_positions[header_names_in_order[idx]]
+                    # en sağdaki sütun
+                    return header_names_in_order[-1], header_x_positions[header_names_in_order[-1]]
+
                 for text, x, y in span_info:
-                    header, header_x = min(sorted_headers, key=lambda h: abs(h[1] - x))
+                    try:
+                        # öncelikle sütun aralığına göre ata (daha kararlı)
+                        header, header_x = assign_header_by_x(x)
+
+                        # fallback (çok yakında bir başka başlığa denk geliyorsa en yakın başlığı seç)
+                        # özellikle sayfa kenarlarında veya eşit uzaklıkta kalan durumlar için
+                        dists = [(h, abs(hx - x)) for h, hx in sorted_headers]
+                        nearest_h, nearest_dist = min(dists, key=lambda t: t[1])
+                        # eğer nearest başlık çok daha yakınsa kullan
+                        if nearest_h != header and nearest_dist + 3.0 < abs(header_x - x):
+                            header = nearest_h
+                            header_x = header_x_positions = header_x_positions  # no-op için bırakıldı
+
+                    except Exception:
+                        # herhangi bir hata olursa mevcut en yakın başlığı kullan
+                        header, header_x = min(sorted_headers, key=lambda h: abs(h[1] - x))
+
+                    # çatışma yönetimi mevcut mantıkla devam eder
                     y_conflict_entries = [s for s in col_buckets[header] if abs(s[2] - y) < 1 and abs(s[1] - x) < 100]
 
                     if y_conflict_entries:
@@ -219,6 +254,8 @@ class PDFProcessor:
                     else:
                         col_buckets[header].append((text, x, y))
 
+                # Satır oluşturulduktan sonra GEOMETRİK kontrol: ilk iki sütunun ortalama X'lerini karşılaştır
+                # eğer kod sütunu ortalama X'i, açıklama sütunundan sağdaysa büyük olasılıkla ters atandı -> takas et
                 row_dict = {h: None for h in headers}
                 for h in headers:
                     if col_buckets[h]:
@@ -237,6 +274,24 @@ class PDFProcessor:
                 if len(headers) >= 2:
                     kod_header = headers[0]
                     aciklama_header = headers[1]
+
+                    # Ortalama X'leri hesapla (sadece var olan bucket'lar için)
+                    def median_x_for_bucket(bucket):
+                        if not bucket:
+                            return None
+                        xs = sorted([t[1] for t in bucket])
+                        mid = len(xs) // 2
+                        return xs[mid] if len(xs) % 2 == 1 else (xs[mid - 1] + xs[mid]) / 2.0
+
+                    kod_mx = median_x_for_bucket(col_buckets.get(kod_header, []))
+                    aciklama_mx = median_x_for_bucket(col_buckets.get(aciklama_header, []))
+
+                    if kod_mx is not None and aciklama_mx is not None:
+                        # eğer kod sütunu görsel olarak sağdaysa (ve aradaki fark anlamlı ise) takas yap
+                        if kod_mx - aciklama_mx > 5.0:
+                            row_dict[kod_header], row_dict[aciklama_header] = row_dict[aciklama_header], row_dict[kod_header]
+
+                    # mevcut önceki satır birleştirme ve parçalama mantığı korunur
                     if not row_dict[kod_header] and row_dict[aciklama_header] and all_data_rows:
                         prev_row = all_data_rows[-1]
                         aciklama_index = headers.index(aciklama_header)
@@ -249,7 +304,6 @@ class PDFProcessor:
                         row_dict[aciklama_header] = parts[1]
 
                 all_data_rows.append([row_dict[h] for h in headers])
-
         df = pd.DataFrame(all_data_rows, columns=headers)
         return df
 
@@ -453,4 +507,3 @@ class PDFProcessor:
         except Exception as e:
             logger.error(f"PDF DataFrame processing failed: {e}")
             raise HTTPException(status_code=500, detail=f"PDF data processing failed: {e}")
-   
