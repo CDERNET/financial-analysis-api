@@ -298,8 +298,9 @@ class PDFProcessor:
         header_texts_lower = {h.lower().strip() for h in headers}
 
         for page in doc:
+            page_height = page.rect.height
             blocks = page.get_text("dict")["blocks"]
-            data_list = self._get_groupped_data(blocks, header_y)
+            data_list = self._get_groupped_data(blocks, header_y,page_height)
 
             # önceki satırın açıklama X’i (devam satırını yakalamak için)
             last_desc_x1 = None
@@ -555,7 +556,7 @@ class PDFProcessor:
 
         return header_x_positions, header_y
     
-    def _get_groupped_data(self, blocks, header_y):
+    def _get_groupped_data(self, blocks, header_y,page_height):
         def _safe_x(val):
             # x her zaman float olsun
             if isinstance(val, (int, float)):
@@ -578,7 +579,7 @@ class PDFProcessor:
                     y = span.get("bbox", [0])[1]
                     text = span.get("text", "").strip()
                     bbox = span.get("bbox")
-                    if text and header_y  < y < 780:
+                    if text and header_y  < y < page_height:
                         spans.append({"x": x, "y": y, "text": text, "bbox": bbox})
 
         # y sonra x'e göre sırala
