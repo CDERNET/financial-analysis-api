@@ -3,7 +3,8 @@
 import logging
 import fitz  # PyMuPDF
 import pandas as pd
-import re
+import ftfy
+import re, unicodedata
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Tuple
 
@@ -14,7 +15,19 @@ from .database_service import DatabaseService
 
 logger = logging.getLogger(__name__)
 Rect = Dict[str, float]  # {"x1":..., "y1":..., "x2":..., "y2":...}
+_TR_MAP = str.maketrans({
+        "ı":"i","İ":"i","ş":"s","Ş":"s","ç":"c","Ç":"c","ğ":"g","Ğ":"g","ö":"o","Ö":"o","ü":"u","Ü":"u"
+    })
 
+    # Tipik mojibake parçacıkları için yama tablosu
+_MOJI_REPL = {
+        "Ã‡":"Ç","Ã§":"ç","Ã–":"Ö","Ã¶":"ö","Ãœ":"Ü","Ã¼":"ü",
+        "Ä":"ğ","ÄŸ":"ğ","Ä°":"İ","Ä±":"ı","ÅŸ":"ş","Å":"ş","Åž":"Ş","Å":"Ş",
+        "Ã":"Ç","Ã":"Ö","Ã":"Ü",
+        "â":"’","â":"–","â":"—",
+        # Bazı dosyalarda görülebilen nadir sapmalar:
+        "Õ":"ı"
+    }
 
 class PDFProcessor:
     """Service for processing PDF files with OCR."""
@@ -147,6 +160,57 @@ class PDFProcessor:
         if re.fullmatch(r"\d+(\.\d+)?", cleaned):
             return cleaned
         return None
+    
+
+    def _apply_moji_map(self,s: str) -> str:
+        for k, v in _MOJI_REPL.items():
+            s = s.replace(k, v)
+        return s
+
+    def _fix_encoding_once(self,s: str) -> str:
+        # 1) ftfy mümkünse
+        if ftfy:
+            s = ftfy.fix_text(s)
+        # 2) Unicode normalize
+        s = unicodedata.normalize("NFKC", s)
+        # 3) hızlı yamalar
+        s = self._apply_moji_map(s)
+        return s
+
+    def _repair_encoding(self,s: str) -> str:
+        """UTF-8↔latin-1/cp1254 ters çözümlemeleri deneyip en temiz adayı seçer."""
+        if not s:
+            return ""
+        s = s.strip()
+        cands = {s, self._fix_encoding_once(s)}
+        for enc in ("latin-1", "cp1254"):
+            # latin-1/cp1254 olarak encode edilip utf-8 diye çözülmüş olabilir
+            try:
+                c = s.encode(enc, "strict").decode("utf-8", "strict")
+                cands.add(self._fix_encoding_once(c))
+            except Exception:
+                pass
+            # tersi: utf-8 iken latin-1/cp1254 diye çözülmüş olabilir
+            try:
+                c = s.encode("utf-8", "strict").decode(enc, "strict")
+                cands.add(self._fix_encoding_once(c))
+            except Exception:
+                pass
+
+        # "kirli karakter" cezalı basit skor: ne kadar az "Ã Ä Å â �" içerirse o kadar iyi
+        def _score(x: str) -> int:
+            junk = ("Ã","Ä","Å","â","�")
+            return -sum(x.count(ch) for ch in junk)
+
+        return max(cands, key=_score)
+
+    def _canon_tr(self,s: str) -> str:
+        """Karşılaştırma için sadeleştirici (aksansız/küçük harf/boşluk normalize)."""
+        s = self._repair_encoding(s).lower().translate(_TR_MAP)
+        s = re.sub(r"[^a-z0-9\s]", " ", s)
+        return " ".join(s.split())
+
+    
     
     # ----------------- geometry helpers -----------------
     def _to_rect(self, bbox: Tuple[float, float, float, float]) -> Rect:
@@ -495,7 +559,7 @@ class PDFProcessor:
         blocks = page0.get_text("dict")["blocks"]
 
         def norm(t: str) -> str:
-            return " ".join(t.strip().lower().split())
+            return self._canon_tr(t)
 
         header_set_norm = [norm(h) for h in headers]
 

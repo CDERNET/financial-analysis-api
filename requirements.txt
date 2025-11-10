@@ -10,6 +10,8 @@ numpy>=1.24.3
 
 # PDF processing
 PyMuPDF==1.23.26
+ftfy>=6.2.0
+
 
 pdf2image>=1.16.0
 pytesseract>=0.3.10
