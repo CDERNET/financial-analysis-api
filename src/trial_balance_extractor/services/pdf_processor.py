@@ -111,8 +111,8 @@ class PDFProcessor:
                     period_id=period_id if period_id is not None else 0
                 )              
                 
-                if item.account_code:  # Only add items with valid account codes
-                    items.append(item)
+                if item.account_code and item.account_name:  # Hem account_code hem account_name dolu olmalı
+                   items.append(item)
                 else:
                     is_data_row_count += 1
                     
@@ -210,7 +210,8 @@ class PDFProcessor:
         s = re.sub(r"[^a-z0-9\s]", " ", s)
         return " ".join(s.split())
 
-    
+   
+
     
     # ----------------- geometry helpers -----------------
     def _to_rect(self, bbox: Tuple[float, float, float, float]) -> Rect:
@@ -359,23 +360,27 @@ class PDFProcessor:
         all_data_rows = []
 
         header_x_positions, header_y = self._get_header_Info(doc, headers)
+        logger.info(f"Header positions: {header_x_positions}, header_y: {header_y}")
         header_texts_lower = {h.lower().strip() for h in headers}
 
         for page in doc:
             page_height = page.rect.height
             blocks = page.get_text("dict")["blocks"]
             data_list = self._get_groupped_data(blocks, header_y,page_height)
-
             # önceki satırın açıklama X’i (devam satırını yakalamak için)
             last_desc_x1 = None
             last_desc_x2 = None
 
            
             for data in data_list:
+                logger.info(f"Processing data line: {[s['text'] for s in data]}")
                 # header satırını atla
                 if any(str(g["text"]).strip().lower() in header_texts_lower for g in data):
                     continue
-
+                
+                first_text = str(data[0].get("text", "")).strip().lower() if data else ""
+                if any(keyword in first_text for keyword in ["toplam", "genel toplam", "ara toplam"]):
+                    continue
                 item_bboxes = [s["bbox"] for s in data if "bbox" in s]
                 bands = self._build_column_bands(header_x_positions, item_bboxes, y_pad=4.0)
 
@@ -663,7 +668,7 @@ class PDFProcessor:
                     g["text"] = (g["text"] + " " + span["text"]).strip()
                     return
             group.append(span)
-        logger.info(f"spans: {spans}")       
+        #logger.info(f"spans: {spans}")       
         for s in spans:
             if current_y is None:
                 current_y = s["y"]
