@@ -5,6 +5,8 @@ import fitz  # PyMuPDF
 import pandas as pd
 import ftfy
 import re, unicodedata
+import json
+
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Tuple
 
@@ -384,6 +386,7 @@ class PDFProcessor:
             page_height = page.rect.height
             blocks = page.get_text("dict")["blocks"]
             data_list = self._get_groupped_data(blocks, header_y,page_height)
+            
             # önceki satırın açıklama X’i (devam satırını yakalamak için)
             last_desc_x1 = None
             last_desc_x2 = None
@@ -592,6 +595,7 @@ class PDFProcessor:
                 continue
             for line in block.get("lines", []):
                 line_spans = line.get("spans", [])
+                
                 hits = []
                 for s in line_spans:
                     text = s.get("text", "").strip()
@@ -642,7 +646,7 @@ class PDFProcessor:
 
         return header_x_positions, header_y
     
-    def _get_groupped_data(self, blocks, header_y,page_height):
+    def _get_groupped_data(self, blocks, header_y, page_height):
         def _safe_x(val):
             # x her zaman float olsun
             if isinstance(val, (int, float)):
@@ -656,7 +660,7 @@ class PDFProcessor:
             return 0.0
 
         spans = []
-        for block in blocks:    
+        for block in blocks:
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
@@ -666,20 +670,41 @@ class PDFProcessor:
                     bbox = span.get("bbox")
                     text = span.get("text", "").strip()
                     norm_text = self.fix_tr_text(text)
-                    logger.info(f"Span text: '{text}' normalized to '{norm_text}' at y={y}")
-                    if text and header_y  < y < page_height:
+                    if text and header_y < y < page_height:
                         spans.append({"x": x, "y": y, "text": norm_text, "bbox": bbox})
 
         # y sonra x'e göre sırala
         spans.sort(key=lambda s: (s["y"], s["x"]))
-        
-       
+
+        # --- Dinamik satır-içi Y toleransı hesapla ---
+        _ys = [s["y"] for s in spans]
+        _ys.sort()
+        _dys = [_ys[i + 1] - _ys[i] for i in range(len(_ys) - 1)] if len(_ys) > 1 else []
+        # küçük farklar satır-içi varyasyonu temsil eder
+        _small = [d for d in _dys if d <= 3.0]  # 3pt altını "aynı satır içi titreşim" kabul
+        if _small:
+            try:
+                from statistics import median as _median
+                y_within_tol = _median(_small)
+            except Exception:
+                a = sorted(_small)
+                n = len(a)
+                y_within_tol = (a[n // 2] if n % 2 else (a[n // 2 - 1] + a[n // 2]) / 2)
+        else:
+            y_within_tol = 1.5  # emniyetli varsayılan
+
+        # alt/üst sınır (çok gevşek veya çok sert olmasın)
+        if y_within_tol < 0.8:
+            y_within_tol = 0.8
+        if y_within_tol > 2.5:
+            y_within_tol = 2.5
+
         # y'ye göre grupla
         grouped_lines = []
         current_group = []
         current_y = None
         x_tol = 2  # aynı x kabul toleransı
-        
+
         def merge_into_group(group, span, x_tol=2):
             """Aynı x'e sahip eleman varsa metni birleştirir, yoksa ekler."""
             for g in group:
@@ -687,13 +712,14 @@ class PDFProcessor:
                     g["text"] = (g["text"] + " " + span["text"]).strip()
                     return
             group.append(span)
-        #logger.info(f"spans: {spans}")       
+
+        #logger.info(f"spans: {spans}")
         for s in spans:
             if current_y is None:
                 current_y = s["y"]
 
-            # aynı satırdaysa (Y farkı 5'dan küçükse)
-            if abs(s["y"] - current_y) <= 9.98:
+            # aynı satırdaysa (dinamik Y toleransı ile)
+            if abs(s["y"] - current_y) <= y_within_tol:
                 merge_into_group(current_group, s, x_tol)
             else:
                 # önceki satırı kaydet
@@ -707,30 +733,41 @@ class PDFProcessor:
         # son satırı da ekle
         if current_group:
             grouped_lines.append(current_group)
-       
-        # --- şimdi ek satırları bir öncekiyle birleştir (tek elemanlı satırlar) ---
+        # --- tek elemanlı satırları bir öncekiyle birleştirirken Y yakınlığını da şart koş ---
         i = 1
+        #logger.info(f"Grouped lines before merging: {grouped_lines}")
         while i < len(grouped_lines):
             curr = grouped_lines[i]
             prev = grouped_lines[i - 1]
             if len(curr) == 1:  # tek elemanlı grup
                 s = curr[0]
-                for p in prev:
-                    if abs(p["x"] - s["x"]) <= x_tol:
-                        p["text"] = (p["text"] + " " + s["text"]).strip()
-                        grouped_lines.pop(i)
-                        i -= 1
-                        break
-            i += 1
-       
+                # satırların ortalama Y'lerini al
+                prev_y = sum(p.get("y", 0.0) for p in prev) / max(1, len(prev))
+                curr_y = s.get("y", prev_y)
+                # sadece Y yakınsa ve X de yakınsa birleştir
+                if abs(curr_y - prev_y) <= y_within_tol:
+                    for p in prev:
+                        if abs(p["x"] - s["x"]) <= x_tol:
+                            p["text"] = (p["text"] + " " + s["text"]).strip()
+                            grouped_lines.pop(i)
+                            i -= 1
+                            break
+                    i += 1
+                else:
+                    i += 1
+            else:
+                i += 1
+
         # parasal filtre
         filtered_grouped = []
         for group in grouped_lines:
+            group = sorted(group, key=lambda s: float(s.get("x", 0)))
+            logger.info(f"Processing group: {group}")
             new_group = []
             for idx, span in enumerate(group):
                 text = span.get("text", "")
 
-                # İlk iki span daima korunur
+                # İlk iki span daima korunur (alan isimlerine bağlı değil)
                 if idx < 2:
                     new_group.append(span)
                     continue
@@ -748,8 +785,9 @@ class PDFProcessor:
         filtered_grouped = [
             sorted(group, key=lambda s: _safe_x(s["x"])) for group in filtered_grouped
         ]
+
         return filtered_grouped
-    
+
     
     #----------------------------------------------------
     # public metot
