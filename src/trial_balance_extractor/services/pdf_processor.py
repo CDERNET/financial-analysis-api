@@ -15,19 +15,8 @@ from .database_service import DatabaseService
 
 logger = logging.getLogger(__name__)
 Rect = Dict[str, float]  # {"x1":..., "y1":..., "x2":..., "y2":...}
-_TR_MAP = str.maketrans({
-        "ı":"i","İ":"i","ş":"s","Ş":"s","ç":"c","Ç":"c","ğ":"g","Ğ":"g","ö":"o","Ö":"o","ü":"u","Ü":"u"
-    })
 
-    # Tipik mojibake parçacıkları için yama tablosu
-_MOJI_REPL = {
-        "Ã‡":"Ç","Ã§":"ç","Ã–":"Ö","Ã¶":"ö","Ãœ":"Ü","Ã¼":"ü",
-        "Ä":"ğ","ÄŸ":"ğ","Ä°":"İ","Ä±":"ı","ÅŸ":"ş","Å":"ş","Åž":"Ş","Å":"Ş",
-        "Ã":"Ç","Ã":"Ö","Ã":"Ü",
-        "â":"’","â":"–","â":"—",
-        # Bazı dosyalarda görülebilen nadir sapmalar:
-        "Õ":"ı"
-    }
+
 
 class PDFProcessor:
     """Service for processing PDF files with OCR."""
@@ -96,7 +85,7 @@ class PDFProcessor:
                 account_name = str(row.get(headers[1], '')).strip()
                 debit  = parse_numeric_value(row.get(headers[2], 0))
                 credit = parse_numeric_value(row.get(headers[3], 0))
-                db_raw = row.get(headers[4], None) if len(headers)>4 else None
+                db_raw = row.get(headers[4], None) if len(headers)> 4 else None
                 cb_raw = row.get(headers[5], None) if len(headers)>5 else None 
                 debit_balance, credit_balance = compute_balances(debit, credit, db_raw, cb_raw)
                 item = TrialBalanceItem(
@@ -160,57 +149,85 @@ class PDFProcessor:
         if re.fullmatch(r"\d+(\.\d+)?", cleaned):
             return cleaned
         return None
-    
-
-    def _apply_moji_map(self,s: str) -> str:
-        for k, v in _MOJI_REPL.items():
-            s = s.replace(k, v)
-        return s
-
-    def _fix_encoding_once(self,s: str) -> str:
-        # 1) ftfy mümkünse
-        if ftfy:
-            s = ftfy.fix_text(s)
-        # 2) Unicode normalize
-        s = unicodedata.normalize("NFKC", s)
-        # 3) hızlı yamalar
-        s = self._apply_moji_map(s)
-        return s
-
-    def _repair_encoding(self,s: str) -> str:
-        """UTF-8↔latin-1/cp1254 ters çözümlemeleri deneyip en temiz adayı seçer."""
-        if not s:
-            return ""
-        s = s.strip()
-        cands = {s, self._fix_encoding_once(s)}
-        for enc in ("latin-1", "cp1254"):
-            # latin-1/cp1254 olarak encode edilip utf-8 diye çözülmüş olabilir
-            try:
-                c = s.encode(enc, "strict").decode("utf-8", "strict")
-                cands.add(self._fix_encoding_once(c))
-            except Exception:
-                pass
-            # tersi: utf-8 iken latin-1/cp1254 diye çözülmüş olabilir
-            try:
-                c = s.encode("utf-8", "strict").decode(enc, "strict")
-                cands.add(self._fix_encoding_once(c))
-            except Exception:
-                pass
-
-        # "kirli karakter" cezalı basit skor: ne kadar az "Ã Ä Å â �" içerirse o kadar iyi
-        def _score(x: str) -> int:
-            junk = ("Ã","Ä","Å","â","�")
-            return -sum(x.count(ch) for ch in junk)
-
-        return max(cands, key=_score)
-
-    def _canon_tr(self,s: str) -> str:
-        """Karşılaştırma için sadeleştirici (aksansız/küçük harf/boşluk normalize)."""
-        s = self._repair_encoding(s).lower().translate(_TR_MAP)
-        s = re.sub(r"[^a-z0-9\s]", " ", s)
-        return " ".join(s.split())
-
    
+    def _mostly_upper(self, s: str) -> bool:
+        # Bozuk gelmiş olabilecek glifler: büyük/küçük kararını şaşırtmasınlar
+        SUSPECTS = set("øùþðæýØÙÞÐÆÝ")
+
+        # Sadece harfleri al
+        letters = [c for c in s if c.isalpha()]
+        if not letters:
+            return False
+
+        # Şüphelileri hariç tutarak karar ver (sağlam harfler)
+        core = [c for c in letters if c not in SUSPECTS]
+        if core:
+            upp = sum(1 for c in core if c.isupper())
+            return upp / len(core) >= 0.7
+
+        # Tümü şüpheliyse: başlık/kolonların çoğu FULL CAPS olduğundan üst varsay
+        return True
+        
+    
+    _TR_CHARS = "çğıöşüÇĞİÖŞÜ"
+    # Bağlamsal (uppercase/lower) karakter eşlemeleri:
+    
+    _MAP_UPPER = {
+        "ø": "İ", "Ø": "İ",
+        "ù": "Ş", "Ù": "Ş",
+        "þ": "Ş", "Þ": "Ş",
+        "ð": "Ğ", "Ð": "Ğ",
+        "æ": "Ç", "Æ": "Ç",
+        "ý": "I", "Ý": "İ",
+        "Õ": "I", "ö": "Ğ"
+    }
+    _MAP_LOWER = {
+        "ø": "ö", "Ø": "Ö",
+        "ù": "ü", "Ù": "Ü",
+        "þ": "ş", "Þ": "Ş",
+        "ð": "ğ", "Ð": "Ğ",
+        "æ": "ç", "Æ": "Ç",
+        "ý": "ı", "Ý": "İ","Õ":"ı"  # dotless/dotted I bağlamı
+    }
+
+    def _contextual_map(self,s: str) -> str:
+        if not s:
+            return s
+        ctx_upper = self._mostly_upper(s)
+        mapping = self._MAP_UPPER if ctx_upper else self._MAP_LOWER
+        # Karakter karakter dönüştür
+        out = []
+        for ch in s:
+            out.append(mapping.get(ch, ch))
+        return "".join(out)
+
+    def _looks_turkish(self,s: str) -> bool:
+        # Türkçe karakterlerden en az biri geçiyor mu?
+        return any(ch in s for ch in self._TR_CHARS)
+
+    def fix_tr_text(self,s: str) -> str:
+        # 1) ftfy
+        t = ftfy.fix_text(s)
+        # 2) bağlamsal karakter eşlemesi
+        t2 = self._contextual_map(t)
+        if self._looks_turkish(t2):
+            return unicodedata.normalize("NFC", t2)
+
+        # 3) Round-trip denemeleri (genel; şablon yok)
+        attempts = (
+            lambda x: x.encode("latin1","ignore").decode("utf-8","ignore"),
+            lambda x: x.encode("cp1252","ignore").decode("utf-8","ignore"),
+            lambda x: x.encode("latin1","ignore").decode("cp1254","ignore"),
+            lambda x: x.encode("cp1252","ignore").decode("cp1254","ignore"),
+        )
+        for fn in attempts:
+            cand = self._contextual_map(ftfy.fix_text(fn(s)))
+            if self._looks_turkish(cand):
+                return unicodedata.normalize("NFC", cand)
+
+        # 4) Yine de emin olmak için normalize edip dön
+        return unicodedata.normalize("NFC", t2)
+            
 
     
     # ----------------- geometry helpers -----------------
@@ -373,7 +390,6 @@ class PDFProcessor:
 
            
             for data in data_list:
-                logger.info(f"Processing data line: {[s['text'] for s in data]}")
                 # header satırını atla
                 if any(str(g["text"]).strip().lower() in header_texts_lower for g in data):
                     continue
@@ -564,7 +580,7 @@ class PDFProcessor:
         blocks = page0.get_text("dict")["blocks"]
 
         def norm(t: str) -> str:
-            return self._canon_tr(t)
+            return self.fix_tr_text(t)
 
         header_set_norm = [norm(h) for h in headers]
 
@@ -581,6 +597,7 @@ class PDFProcessor:
                     text = s.get("text", "").strip()
                     if not text:
                         continue
+                    
                     if norm(text) in header_set_norm:
                         hits.append(s)
 
@@ -646,10 +663,12 @@ class PDFProcessor:
                 for span in line.get("spans", []):
                     x = span.get("bbox", [0])[0]
                     y = span.get("bbox", [0])[1]
-                    text = span.get("text", "").strip()
                     bbox = span.get("bbox")
+                    text = span.get("text", "").strip()
+                    norm_text = self.fix_tr_text(text)
+                    logger.info(f"Span text: '{text}' normalized to '{norm_text}' at y={y}")
                     if text and header_y  < y < page_height:
-                        spans.append({"x": x, "y": y, "text": text, "bbox": bbox})
+                        spans.append({"x": x, "y": y, "text": norm_text, "bbox": bbox})
 
         # y sonra x'e göre sırala
         spans.sort(key=lambda s: (s["y"], s["x"]))
