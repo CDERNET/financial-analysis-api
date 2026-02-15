@@ -82,7 +82,7 @@ class PDFProcessor:
                 is_data_row_count += 1
                 continue
             try:
-               
+                logger.info(f"Processing row: {row.to_dict()}")
                 account_code = str(row.get(headers[0], '')).strip()
                 account_name = str(row.get(headers[1], '')).strip()
                 debit  = parse_numeric_value(row.get(headers[2], 0))
@@ -90,6 +90,9 @@ class PDFProcessor:
                 db_raw = row.get(headers[4], None) if len(headers)> 4 else None
                 cb_raw = row.get(headers[5], None) if len(headers)>5 else None 
                 debit_balance, credit_balance = compute_balances(debit, credit, db_raw, cb_raw)
+                # Handle parent_code: convert nan to None for Pydantic validation
+                parent_code = row.get('parent_code')
+                parent_account_code = str(parent_code).strip() if pd.notna(parent_code) else None
                 item = TrialBalanceItem(
                     account_code=account_code,
                     account_name=account_name,
@@ -97,7 +100,7 @@ class PDFProcessor:
                     credit=credit,
                     debit_balance=debit_balance,
                     credit_balance=credit_balance,
-                    parent_account_code=row.get('parent_code'),
+                    parent_account_code=parent_account_code,
                     account_number=account_number if account_number is not None else 0,
                     period_id=period_id if period_id is not None else 0
                 )              
