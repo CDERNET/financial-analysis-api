@@ -42,7 +42,7 @@ async def excel_file(
     period_id: str = Form("", description="Period identifier (optional for preview)")
 ) -> ProcessingResult:
     """
-    Preview Excel file data without saving to database.
+    Preview Excel file data.
     
     Args:
         file: Uploaded Excel/CSV file
@@ -52,7 +52,7 @@ async def excel_file(
         period_id: Period identifier (optional for preview)
         
     Returns:
-        Processing result with extracted data (no database save)
+        Processing result with extracted data
         
     Raises:
         HTTPException: If processing fails
@@ -123,8 +123,8 @@ async def excel_file(
 @router.post(
     "/pdf",
     response_model=ProcessingResult, 
-    summary="Preview PDF file data without saving to database",
-    description="Upload PDF file to extract and preview trial balance data using OCR without storing in database"
+    summary="Preview PDF file data",
+    description="Upload PDF file to extract and preview trial balance data using OCR"
 )
 async def pdf_file(
     file: UploadFile = File(..., description="PDF file containing trial balance data"),
@@ -138,7 +138,7 @@ async def pdf_file(
     period_id: str = Form("", description="Period identifier (optional for preview)")
 ) -> ProcessingResult:
     """
-    Preview PDF file data without saving to database.
+    Preview PDF file data.
     
     Args:
         file: Uploaded PDF file
