@@ -1,11 +1,12 @@
 """PDF processing service with OCR capabilities."""
 
 import logging
+import unicodedata
 import fitz  # PyMuPDF
 import pandas as pd
 import ftfy
-import re, unicodedata
-import json
+import re
+import unicodedata
 
 from fastapi import HTTPException
 from typing import List, Optional, Dict, Tuple
@@ -14,17 +15,13 @@ from ..models.schemas import TrialBalanceItem, ProcessingResult
 from ..utils.text_processing import compute_balances, find_parent_code, parse_numeric_value
 from .tree_builder import TreeBuilder
 from .database_service import DatabaseService
+from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 Rect = Dict[str, float]  # {"x1":..., "y1":..., "x2":..., "y2":...}
 
-
-
 class PDFProcessor:
-    """Service for processing PDF files with OCR."""
-    
     def __init__(self):
-        """Initialize PDF processor with dependencies."""
         self.tree_builder = TreeBuilder()
         self.db_service = DatabaseService()
     
@@ -539,8 +536,9 @@ class PDFProcessor:
     ) -> ProcessingResult:
         """
         Process extracted PDF DataFrame without saving to database.
-        """
+        """ 
         try:
+            settings = get_settings()
             # Build parent relationships
             account_code_col = headers[0]
             df[account_code_col] = df[account_code_col].astype(str).str.strip()
@@ -549,15 +547,16 @@ class PDFProcessor:
             df['parent_code'] = df[account_code_col].apply(
                 lambda x: find_parent_code(x, all_codes, separator)
             )
-            
-            # Convert to trial balance items
             items = self._dataframe_to_items(df, headers, account_number, period_id)
+            if settings.with_database:
+                inserted_count = self.db_service.insert_trial_balance_items(items)
+            else:
+                inserted_count = 0  # No database insertion
             
-            # Return result without database insertion
             return ProcessingResult(
                 success=True,
-                message=f"Successfully processed PDF with {len(items)} records (no database save)",
-                inserted_count=0,  # No database insertion
+                message=f"Successfully processed PDF with {len(items)} records.",
+                inserted_count=inserted_count,  # No database insertion
                 account_number=account_number if account_number is not None else 0,
                 period_id=period_id if period_id is not None else 0,
                 data=[item.model_dump() for item in items]  # Include the processed data in response

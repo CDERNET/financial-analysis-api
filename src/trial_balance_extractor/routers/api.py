@@ -1,7 +1,7 @@
 """API endpoints for trial balance processing."""
 
 import logging
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, Query, UploadFile, HTTPException
@@ -27,167 +27,10 @@ settings = get_settings()
 @router.post(
     "/excel",
     response_model=ProcessingResult,
-    summary="Process Excel file and extract trial balance data",
-    description="Upload Excel, XLS, or CSV file to extract trial balance data and store in database"
-)
-async def process_excel_file(
-    file: UploadFile = File(..., description="Excel, XLS or CSV file containing trial balance data"),
-    headers: str = Form(
-        ..., 
-        description="Column headers separated by commas",
-        example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
-    ),
-    separator: str = Form(".", description="Account hierarchy separator", example="."),
-    account_number: int = Form(..., description="Customer/Account number"),
-    period_id: int = Form(..., description="Period identifier")
-) -> ProcessingResult:
-    """
-    Process Excel file and extract trial balance data.
-    
-    Args:
-        file: Uploaded Excel/CSV file
-        headers: Comma-separated column headers
-        separator: Account hierarchy separator
-        account_number: Customer account number
-        period_id: Period identifier
-        
-    Returns:
-        Processing result with success status and details
-        
-    Raises:
-        HTTPException: If processing fails
-    """
-    start_time = datetime.now()
-    logger.info(f"Excel processing started at {start_time}")
-    
-    try:
-        # Validate file
-        validate_file_extension(file.filename, settings.allowed_extensions)
-        
-        file_content = await file.read()
-        validate_file_size(len(file_content), settings.max_file_size)
-        
-        # Validate parameters
-        validate_account_parameters(account_number, period_id)
-
-         # Parse headers
-        try:
-            header_list = [h.strip() for h in headers.split(",")]
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to parse headers: {e}")
-        
-        if not header_list:
-            raise HTTPException(status_code=400, detail="Headers cannot be empty")
-        
-        logger.info(f"Parsed headers: {header_list}")
-        # Process file
-        result = excel_processor.process_excel_file(
-            file_content=file_content,
-            filename=file.filename,
-            headers=header_list,
-            separator=separator,
-            account_number=account_number,
-            period_id=period_id
-        )
-        
-        end_time = datetime.now()
-        elapsed_time = (end_time - start_time).total_seconds()
-        logger.info(f"Excel processing completed in {elapsed_time:.2f} seconds")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Excel processing error: {e}")
-        raise HTTPException(status_code=500, detail=f"Excel processing failed: {e}")
-
-
-@router.post(
-    "/pdf",
-    response_model=ProcessingResult, 
-    summary="Process PDF file and extract trial balance data",
-    description="Upload PDF file to extract trial balance data using OCR and store in database"
-)
-async def process_pdf_file(
-    file: UploadFile = File(..., description="PDF file containing trial balance data"),
-    headers: str = Form(
-        ..., 
-        description="Column headers separated by commas",
-        example="HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK"
-    ),
-    separator: str = Form(".", description="Account hierarchy separator", example="."),
-    account_number: int = Form(..., description="Customer/Account number"),
-    period_id: int = Form(..., description="Period identifier")
-) -> ProcessingResult:
-    """
-    Process PDF file and extract trial balance data using OCR.
-    
-    Args:
-        file: Uploaded PDF file
-        headers: Comma-separated column headers
-        separator: Account hierarchy separator
-        account_number: Customer account number
-        period_id: Period identifier
-        
-    Returns:
-        Processing result with success status and details
-        
-    Raises:
-        HTTPException: If processing fails
-    """
-    start_time = datetime.now()
-    logger.info(f"PDF processing started at {start_time}")
-    
-    try:
-        # Validate file
-        if not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        file_content = await file.read()
-        validate_file_size(len(file_content), settings.max_file_size)
-        
-        # Parse headers
-        try:
-            header_list = [h.strip() for h in headers.split(",")]
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to parse headers: {e}")
-        
-        if not header_list:
-            raise HTTPException(status_code=400, detail="Headers cannot be empty")
-        
-        # Validate parameters
-        validate_account_parameters(account_number, period_id)
-        
-        # Process file
-        result = pdf_processor.process_pdf_file(
-            file_content=file_content,
-            headers=header_list,
-            separator=separator,
-            account_number=account_number,
-            period_id=period_id
-        )
-        
-        end_time = datetime.now()
-        elapsed_time = (end_time - start_time).total_seconds()
-        logger.info(f"PDF processing completed in {elapsed_time:.2f} seconds")
-        
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"PDF processing error: {e}")
-        raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
-
-
-@router.post(
-    "/excel/preview",
-    response_model=ProcessingResult,
     summary="Preview Excel file data without saving to database.",
     description="Upload Excel, XLS, or CSV file to extract and preview trial balance data without storing in database"
 )
-async def preview_excel_file(
+async def excel_file(
     file: UploadFile = File(..., description="Excel, XLS or CSV file containing trial balance data"),
     headers: str = Form(
         ..., 
@@ -255,7 +98,7 @@ async def preview_excel_file(
         
         logger.info(f"Parsed headers: {header_list}")
         # Process file without saving
-        result = excel_processor.process_excel_file_no_save(
+        result = excel_processor.process_excel_file(
             file_content=file_content,
             filename=file.filename,
             headers=header_list,
@@ -278,12 +121,12 @@ async def preview_excel_file(
 
 
 @router.post(
-    "/pdf/preview",
+    "/pdf",
     response_model=ProcessingResult, 
     summary="Preview PDF file data without saving to database",
     description="Upload PDF file to extract and preview trial balance data using OCR without storing in database"
 )
-async def preview_pdf_file(
+async def pdf_file(
     file: UploadFile = File(..., description="PDF file containing trial balance data"),
     headers: str = Form(
         ..., 
@@ -434,7 +277,7 @@ def get_account_tree(
     summary="Health check endpoint",
     description="Check API and database health status"
 )
-def health_check():
+def health_check() -> JSONResponse:
     """
     Health check endpoint.
     

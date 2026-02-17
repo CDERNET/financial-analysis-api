@@ -1,7 +1,5 @@
 """Application settings and configuration management."""
 
-import os
-from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from functools import lru_cache
@@ -12,6 +10,9 @@ class Settings(BaseSettings):
     
     # Data Storage Configuration  
     data_directory: str = Field(default="data", env="DATA_DIRECTORY")
+   
+    # Database Configuration (if using a database)
+    with_database: bool = Field(default=False, env="WITH_DATABASE")
     
     # API Configuration
     api_title: str = "Trial Balance Extractor API"
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     
     # File Processing Configuration
     max_file_size: int = Field(default=50 * 1024 * 1024, env="MAX_FILE_SIZE")  # 50MB
-    allowed_extensions: list[str] = [".xlsx",".xlsm", ".xls", ".csv", ".pdf"]
+    allowed_extensions: list[str] = [".xlsx", ".xlsm", ".xls", ".csv", ".pdf"]
     
     # OCR Configuration
     tesseract_lang: str = Field(default="tur", env="TESSERACT_LANG")
