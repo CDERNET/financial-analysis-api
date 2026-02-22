@@ -11,7 +11,6 @@ import uvicorn
 
 from .config import get_settings
 from .routers import router
-from .services import DatabaseService
 
 
 # Configure logging
@@ -45,16 +44,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger = logging.getLogger(__name__)
     logger.info("Starting Trial Balance Extractor API...")
-    
-    # Test data directory access
-    db_service = DatabaseService()
-    if db_service.check_connection():
-        logger.info("Data directory access successful")
-    else:
-        logger.warning("Data directory access failed - some features may not work")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Trial Balance Extractor API...")
 

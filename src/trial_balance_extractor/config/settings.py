@@ -8,12 +8,6 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
-    # Data Storage Configuration  
-    data_directory: str = Field(default="data", env="DATA_DIRECTORY")
-   
-    # Database Configuration (if using a database)
-    with_database: bool = Field(default=False, env="WITH_DATABASE")
-    
     # API Configuration
     api_title: str = "Trial Balance Extractor API"
     api_description: str = "MIZAN PDF/Excel'den başlık bazlı veri çıkarımı ve ağaç yapısına dönüştürme"

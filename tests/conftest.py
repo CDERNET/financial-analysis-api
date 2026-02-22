@@ -1,11 +1,9 @@
 """Test configuration and fixtures."""
 
 import pytest
-from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from trial_balance_extractor.main import create_app
-from trial_balance_extractor.services import DatabaseService
 
 
 @pytest.fixture
@@ -18,16 +16,6 @@ def app():
 def client(app):
     """Create test client."""
     return TestClient(app)
-
-
-@pytest.fixture
-def mock_db_service():
-    """Create mock database service."""
-    mock_service = Mock(spec=DatabaseService)
-    mock_service.check_connection.return_value = True
-    mock_service.insert_trial_balance_items.return_value = 5
-    mock_service.get_account_tree_data.return_value = []
-    return mock_service
 
 
 @pytest.fixture

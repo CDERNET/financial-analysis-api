@@ -33,37 +33,16 @@ class TrialBalanceItem(BaseModel):
         return 0.0
 
 
-class TreeNode(BaseModel):
-    """Model for hierarchical tree node structure."""
-    
-    account_code: str
-    account_name: str
-    debit: float = 0.0
-    credit: float = 0.0
-    debit_balance: float = 0.0 
-    credit_balance: float = 0.0
-    parent_account_code: Optional[str] = None
-    children: List['TreeNode'] = Field(default_factory=list)
-    
-    class Config:
-        # Enable self-referencing models
-        arbitrary_types_allowed = True
-
-
-# Update forward references
-TreeNode.model_rebuild()
-
 
 class ProcessingResult(BaseModel):
     """Model for file processing results."""
-    
+
     success: bool = Field(..., description="Processing success status")
     message: str = Field(..., description="Result message")
-    inserted_count: int = Field(default=0, description="Number of records inserted")
     account_number: Optional[int] = Field(None, description="Account number processed")
     period_id: Optional[int] = Field(None, description="Period ID processed")
     errors: List[str] = Field(default_factory=list, description="Processing errors")
-    data: Optional[List[Dict[str, Any]]] = Field(None, description="Processed data (when not saved to database)")
+    data: Optional[List[Dict[str, Any]]] = Field(None, description="Processed data")
 
 
 class FileUploadRequest(BaseModel):
@@ -75,13 +54,6 @@ class FileUploadRequest(BaseModel):
     period_id: int = Field(..., description="Period identifier")
 
 
-class AccountTreeResponse(BaseModel):
-    """Model for account tree API response."""
-    
-    data: List[TreeNode] = Field(..., description="Account tree data")
-    total_count: int = Field(..., description="Total number of nodes")
-    account_number: int = Field(..., description="Account number")
-    period_id: int = Field(..., description="Period ID")
 
 
 class PDFHeaders(BaseModel):

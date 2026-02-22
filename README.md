@@ -4,14 +4,14 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A professional FastAPI application for extracting trial balance data from PDF and Excel files, with OCR capabilities and hierarchical account tree building.
+A professional FastAPI application for extracting trial balance data from PDF and Excel files, with OCR capabilities and hierarchical account detection.
 
 ## 🎯 Features
 
 - **Multi-format Support**: Process Excel (.xlsx, .xls), CSV, and PDF files
 - **OCR Processing**: Extract data from PDF documents using PyMuPDF and Tesseract
-- **Hierarchical Trees**: Build parent-child account relationships automatically
-- **File-based Storage**: Store processed data in JSON files
+- **Hierarchical Detection**: Build parent-child account relationships automatically
+- **Stateless API**: Returns extracted data directly as API response
 - **RESTful API**: FastAPI with automatic Swagger documentation
 - **Turkish Language Support**: Handle Turkish characters and number formats
 - **Docker Support**: Containerized deployment with Docker Compose
@@ -34,10 +34,8 @@ trial_balance_extractor/
 │       │   └── schemas.py           # Pydantic models
 │       ├── services/
 │       │   ├── __init__.py
-│       │   ├── database_service.py  # Database operations
 │       │   ├── excel_processor.py   # Excel file processing
-│       │   ├── pdf_processor.py     # PDF processing with OCR
-│       │   └── tree_builder.py      # Hierarchical tree building
+│       │   └── pdf_processor.py     # PDF processing with OCR
 │       ├── routers/
 │       │   ├── __init__.py
 │       │   └── api.py               # API endpoints
@@ -49,8 +47,7 @@ trial_balance_extractor/
 ├── tests/                           # Test suite
 │   ├── __init__.py
 │   ├── conftest.py                  # Test configuration
-│   ├── test_text_processing.py
-│   └── test_tree_builder.py
+│   └── test_text_processing.py
 ├── requirements.txt                 # Production dependencies
 ├── pyproject.toml                   # Project configuration
 ├── README.md                        # This file
@@ -86,9 +83,8 @@ trial_balance_extractor/
    ```
 
 4. **Configure environment:**
-   Create a `.env` file with your storage settings:
+   Create a `.env` file:
    ```env
-   DATA_DIRECTORY=data
    API_HOST=0.0.0.0
    API_PORT=8000
    LOG_LEVEL=INFO
@@ -122,7 +118,7 @@ trial_balance_extractor/
 ```bash
 curl -X POST "http://localhost:8000/api/v1/excel" \
   -F "file=@trial_balance.xlsx" \
-  -F "account_code_column=Hesap Kodu" \
+  -F "headers=HESAP KODU,AÇIKLAMA,BORÇ,ALACAK,BAK. BORÇ,BAK. ALACAK" \
   -F "separator=." \
   -F "account_number=12345" \
   -F "period_id=202403"
@@ -139,23 +135,18 @@ curl -X POST "http://localhost:8000/api/v1/pdf" \
   -F "period_id=202403"
 ```
 
-### Get Account Tree
-
-```bash
-curl "http://localhost:8000/api/v1/account-tree?account_number=12345&period_id=202403"
-```
-
 ## 🔧 Configuration
 
 The application supports configuration through environment variables or `.env` file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATA_DIRECTORY` | `data` | Directory for data storage |
 | `API_HOST` | `0.0.0.0` | API host address |
 | `API_PORT` | `8000` | API port number |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `MAX_FILE_SIZE` | `52428800` | Max file size (50MB) |
+| `TESSERACT_LANG` | `tur` | Tesseract OCR language |
+| `PDF_DPI` | `300` | PDF rendering DPI |
 
 ## 🧪 Testing
 
@@ -169,7 +160,7 @@ pytest
 pytest --cov=trial_balance_extractor
 
 # Run specific test file
-pytest tests/test_tree_builder.py
+pytest tests/test_text_processing.py
 ```
 
 ## 📊 Column Mapping
@@ -185,33 +176,12 @@ The application automatically maps various column names to standard formats:
 | DebitBalance | "Borç Bakiye", "Bakiye Borç", "TL BORÇ BAKİYE", "Bak. Borç" |
 | CreditBalance | "Alacak Bakiye", "Bakiye Alac.", "TL ALACAK BAKİYE", "Bak. Alacak" |
 
-## 🏢 Database Schema
-
-The application expects the following database table:
-
-```sql
-CREATE TABLE CustomerDetailedTrialBalance (
-    Id int IDENTITY(1,1) PRIMARY KEY,
-    AccountCode nvarchar(50) NOT NULL,
-    AccountName nvarchar(255),
-    Debit decimal(18,2) DEFAULT 0,
-    Credit decimal(18,2) DEFAULT 0,
-    DebitBalance decimal(18,2) DEFAULT 0,
-    CreditBalance decimal(18,2) DEFAULT 0,
-    ParentAccountCode nvarchar(50),
-    AccountNumber int NOT NULL,
-    PeriodId int NOT NULL,
-    CreatedAt datetime DEFAULT GETDATE()
-);
-```
-
 ## 🐛 Error Handling
 
 The application provides comprehensive error handling:
 
 - **File Validation**: Size limits, format validation
 - **Data Processing**: Invalid data handling, missing columns
-- **Database Errors**: Connection issues, constraint violations
 - **OCR Errors**: PDF reading issues, text extraction problems
 
 All errors are logged and return appropriate HTTP status codes with detailed messages.
