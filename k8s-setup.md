@@ -1,10 +1,10 @@
-# Trial Balance Extractor - Kubernetes Deployment Guide
+# Financial Analysis - Kubernetes Deployment Guide
 
-Bu rehber, Trial Balance Extractor uygulamasının Kubernetes cluster'ına deploy edilmesi için gerekli adımları içermektedir.
+Bu rehber, Financial Analysis uygulamasının Kubernetes cluster'ına deploy edilmesi için gerekli adımları içermektedir.
 
 ## Genel Bakış
 
-Trial Balance Extractor, Excel ve PDF dosyalarından mizan bilgilerini çıkarmak için kullanılan bir FastAPI uygulamasıdır. Tesseract OCR ve çeşitli veri işleme kütüphanelerini kullanır.
+Financial Analysis, Excel ve PDF dosyalarından mizan bilgilerini çıkarmak için kullanılan bir FastAPI uygulamasıdır. Tesseract OCR ve çeşitli veri işleme kütüphanelerini kullanır.
 
 ## Ön Gereksinimler
 
@@ -16,13 +16,13 @@ Trial Balance Extractor, Excel ve PDF dosyalarından mizan bilgilerini çıkarma
 
 ```bash
 # Docker image'ı build edin ve kendi registry'nize push edin
-docker build -t your-registry.com/trial-balance-extractor:latest .
+docker build -t your-registry.com/financial-analysis:latest .
 ```
 
 ## 2. Konfigürasyon Düzenleme
 
 ### Deployment Image Güncellemesi
-`k8s/deployment.yaml` dosyasındaki `your-registry.com/trial-balance-extractor:latest` kısmını kendi image adresinizle değiştirin.
+`k8s/deployment.yaml` dosyasındaki `your-registry.com/financial-analysis:latest` kısmını kendi image adresinizle değiştirin.
 
 ## 3. Deployment
 
@@ -43,10 +43,10 @@ kubectl get pods
 kubectl get svc
 
 # Logları kontrol et
-kubectl logs -f deployment/trial-balance-extractor
+kubectl logs -f deployment/financial-analysis
 
 # Health check
-kubectl port-forward svc/trial-balance-service 8080:8000
+kubectl port-forward svc/financial-analysis-service 8080:8000
 curl http://localhost:8080/health
 ```
 
@@ -54,7 +54,7 @@ curl http://localhost:8080/health
 
 ```bash
 # Replica sayısını değiştir
-kubectl scale deployment trial-balance-extractor --replicas=3
+kubectl scale deployment financial-analysis --replicas=3
 ```
 
 ## 6. Troubleshooting

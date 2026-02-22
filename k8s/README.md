@@ -1,6 +1,6 @@
 # Kubernetes Deployment Files
 
-Bu klasör Trial Balance Extractor uygulamasının Kubernetes'e deploy edilmesi için gerekli dosyaları içerir.
+Bu klasör Financial Analysis uygulamasının Kubernetes'e deploy edilmesi için gerekli dosyaları içerir.
 
 ## Dosyalar
 
@@ -19,7 +19,7 @@ Bu klasör Trial Balance Extractor uygulamasının Kubernetes'e deploy edilmesi 
 ```bash
 kubectl get pods
 kubectl get svc
-kubectl logs -f deployment/trial-balance-extractor
+kubectl logs -f deployment/financial-analysis
 ```
 
 LoadBalancer service external IP alacak ve uygulama 8000 portunda erişilebilir olacaktır.

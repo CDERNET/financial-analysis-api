@@ -1,27 +1,20 @@
 services:
-  # Trial Balance Extractor API
-  trial-balance-api:
+  # Financial Analysis API
+  financial-analysis-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: trial-balance-extractor
+    container_name: financial-analysis
     ports:
       - "8000:8000"
     environment:
-      - DB_SERVER=mssql
-      - DB_DATABASE=MizanDB
-      - DB_USERNAME=sa
-      - DB_PASSWORD=Password123!
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=INFO
     volumes:
       - ./logs:/app/logs
-      - ./data:/app/data
-    depends_on:
-      - mssql
     networks:
-      - trial-balance-network
+      - financial-analysis-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -29,26 +22,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Microsoft SQL Server 2022
-  mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    platform: linux/amd64
-    container_name: mssql
-    ports:
-      - "1433:1433"
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=Password123!
-    volumes:
-      - mssql_data:/var/opt/mssql
-    networks:
-      - trial-balance-network
-    restart: unless-stopped
-
-volumes:
-  mssql_data:
-    driver: local
-
 networks:
-  trial-balance-network:
+  financial-analysis-network:
     driver: bridge

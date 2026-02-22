@@ -1,1 +1,1 @@
-"""Tests package for Trial Balance Extractor."""
+"""Tests package for Financial Analysis."""
