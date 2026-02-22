@@ -1,10 +1,9 @@
-"""API endpoints for trial balance processing."""
+"""API endpoints for mizan (trial balance) processing."""
 
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, File, Form, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
 
 from ..config import get_settings
 from ..models.schemas import ProcessingResult
@@ -13,7 +12,7 @@ from ..utils.validators import validate_file_extension, validate_file_size, vali
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["Mizan"])
 
 # Initialize services
 excel_processor = ExcelProcessor()
@@ -210,22 +209,3 @@ async def pdf_file(
     except Exception as e:
         logger.error(f"PDF processing error: {e}")
         raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
-
-
-@router.get(
-    "/health",
-    summary="Health check endpoint",
-    description="Check API health status"
-)
-def health_check() -> JSONResponse:
-    """
-    Health check endpoint.
-
-    Returns:
-        Health status information
-    """
-    return JSONResponse(content={
-        "status": "healthy",
-        "api": "online",
-        "timestamp": datetime.now().isoformat()
-    })

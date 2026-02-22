@@ -30,8 +30,8 @@ Thumbs.db
 *.log
 logs/
 
-# Data
-data/
+# Data (root level only, not package data)
+/data/
 
 # Distribution
 *.tar.gz

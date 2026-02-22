@@ -33,6 +33,7 @@ dependencies = [
     "PyMuPDF>=1.23.8",
     "pdf2image>=1.16.0",
     "pytesseract>=0.3.10",
+    "pdfplumber>=0.10.0",
     "openpyxl>=3.1.2",
     "xlrd>=2.0.1",
     "pydantic>=2.5.0",
@@ -64,6 +65,9 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.setuptools.package-data]
+trial_balance_extractor = ["data/*.json"]
 
 # Black configuration
 [tool.black]

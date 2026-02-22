@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     
     # API Configuration
     api_title: str = "Trial Balance Extractor API"
-    api_description: str = "MIZAN PDF/Excel'den başlık bazlı veri çıkarımı ve ağaç yapısına dönüştürme"
+    api_description: str = "Mizan PDF/Excel veri çıkarımı ve GIB beyanname PDF parse servisi"
     api_version: str = "2.0.0"
     api_host: str = Field(default="0.0.0.0", env="API_HOST")
     api_port: int = Field(default=8000, env="API_PORT")

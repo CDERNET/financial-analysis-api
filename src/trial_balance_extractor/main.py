@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from .config import get_settings
-from .routers import router
+from .routers import mizan_router, beyanname_router
 
 
 # Configure logging
@@ -85,7 +85,8 @@ def create_app() -> FastAPI:
     )
     
     # Include routers
-    app.include_router(router, prefix="/api/v1")
+    app.include_router(mizan_router, prefix="/api/v1/mizan")
+    app.include_router(beyanname_router, prefix="/api/v1/beyanname")
     
     logger.info(f"FastAPI application created: {settings.api_title} v{settings.api_version}")
     return app
