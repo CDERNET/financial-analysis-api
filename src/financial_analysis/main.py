@@ -1,4 +1,4 @@
-"""Main FastAPI application for Trial Balance Extractor."""
+"""Main FastAPI application for Financial Analysis."""
 
 import logging
 import sys
@@ -23,7 +23,7 @@ def setup_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",#settings.log_format,
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler("trial_balance_extractor.log", mode="a", encoding="utf-8")
+            logging.FileHandler("financial_analysis.log", mode="a", encoding="utf-8")
         ]
     )
     
@@ -43,12 +43,12 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger = logging.getLogger(__name__)
-    logger.info("Starting Trial Balance Extractor API...")
+    logger.info("Starting Financial Analysis API...")
 
     yield
 
     # Shutdown
-    logger.info("Shutting down Trial Balance Extractor API...")
+    logger.info("Shutting down Financial Analysis API...")
 
 
 def create_app() -> FastAPI:
@@ -107,7 +107,7 @@ def root():
     """
     settings = get_settings()
     return {
-        "message": "Welcome to Trial Balance Extractor API",
+        "message": "Welcome to Financial Analysis API",
         "title": settings.api_title,
         "version": settings.api_version,
         "description": settings.api_description,
@@ -127,7 +127,7 @@ def health_check():
     """
     return {
         "status": "healthy",
-        "message": "Trial Balance Extractor API is running",
+        "message": "Financial Analysis API is running",
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 
@@ -137,7 +137,7 @@ def main():
     settings = get_settings()
     
     uvicorn.run(
-        "trial_balance_extractor.main:app",
+        "financial_analysis.main:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=True,  # Set to False in production

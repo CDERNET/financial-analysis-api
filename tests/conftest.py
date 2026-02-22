@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from trial_balance_extractor.main import create_app
+from financial_analysis.main import create_app
 
 
 @pytest.fixture

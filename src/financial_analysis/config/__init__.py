@@ -1,4 +1,4 @@
-"""Configuration package for Trial Balance Extractor."""
+"""Configuration package for Financial Analysis."""
 
 from .settings import Settings, get_settings
 

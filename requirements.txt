@@ -1,4 +1,4 @@
-# Trial Balance Extractor - Production Dependencies
+# Financial Analysis - Production Dependencies
 # FastAPI and web server
 fastapi>=0.104.1
 uvicorn[standard]>=0.24.0

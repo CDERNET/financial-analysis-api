@@ -1,7 +1,7 @@
 """Tests for text processing utilities."""
 
 import pytest
-from trial_balance_extractor.utils.text_processing import (
+from financial_analysis.utils.text_processing import (
     clean_text,
     normalize_text,
     find_parent_code,

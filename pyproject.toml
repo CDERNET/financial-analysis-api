@@ -3,15 +3,15 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trial-balance-extractor"
+name = "financial-analysis"
 version = "2.0.0"
 description = "MIZAN PDF/Excel'den başlık bazlı veri çıkarımı ve ağaç yapısına dönüştürme"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Trial Balance Extractor Team", email = "dev@example.com"}
+    {name = "Financial Analysis Team", email = "dev@example.com"}
 ]
-keywords = ["trial-balance", "pdf", "excel", "ocr", "financial", "accounting"]
+keywords = ["financial-analysis", "pdf", "excel", "ocr", "financial", "accounting"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Financial and Insurance Industry",
@@ -58,7 +58,7 @@ Repository = "https://github.com/cdemir5/scsoft-TrialBalanceExtractor"
 Issues = "https://github.com/cdemir5/scsoft-TrialBalanceExtractor/issues"
 
 [project.scripts]
-trial-balance-extractor = "trial_balance_extractor.main:main"
+financial-analysis = "financial_analysis.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -67,7 +67,7 @@ where = ["src"]
 "" = "src"
 
 [tool.setuptools.package-data]
-trial_balance_extractor = ["data/*.json"]
+financial_analysis = ["data/*.json"]
 
 # Black configuration
 [tool.black]
@@ -119,7 +119,7 @@ filterwarnings = [
 
 # Coverage configuration
 [tool.coverage.run]
-source = ["src/trial_balance_extractor"]
+source = ["src/financial_analysis"]
 omit = [
     "*/tests/*",
     "*/test_*.py",

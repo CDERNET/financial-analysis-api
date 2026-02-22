@@ -1,10 +1,10 @@
 services:
-  # Trial Balance Extractor API
-  trial-balance-api:
+  # Financial Analysis API
+  financial-analysis-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: trial-balance-extractor
+    container_name: financial-analysis
     ports:
       - "8000:8000"
     environment:
@@ -14,7 +14,7 @@ services:
     volumes:
       - ./logs:/app/logs
     networks:
-      - trial-balance-network
+      - financial-analysis-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -23,5 +23,5 @@ services:
       retries: 3
 
 networks:
-  trial-balance-network:
+  financial-analysis-network:
     driver: bridge

@@ -1,4 +1,4 @@
-# Trial Balance Extractor
+# Financial Analysis
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com)
@@ -21,9 +21,9 @@ A professional FastAPI application for extracting trial balance data from PDF an
 ## 🏗️ Project Structure
 
 ```
-trial_balance_extractor/
+financial_analysis/
 ├── src/
-│   └── trial_balance_extractor/
+│   └── financial_analysis/
 │       ├── __init__.py              # Package initialization
 │       ├── main.py                  # FastAPI application
 │       ├── config/
@@ -92,12 +92,12 @@ trial_balance_extractor/
 
 5. **Run the application:**
    ```bash
-   python -m trial_balance_extractor.main
+   python -m financial_analysis.main
    ```
 
    Or use the console script:
    ```bash
-   trial-balance-extractor
+   financial-analysis
    ```
 
 ### Docker Deployment
@@ -157,7 +157,7 @@ Run the test suite:
 pytest
 
 # Run with coverage
-pytest --cov=trial_balance_extractor
+pytest --cov=financial_analysis
 
 # Run specific test file
 pytest tests/test_text_processing.py
@@ -196,7 +196,7 @@ Logging is configured with multiple levels:
 - **ERROR**: Error conditions
 - **CRITICAL**: Critical failures
 
-Logs are written to both console and file (`trial_balance_extractor.log`).
+Logs are written to both console and file (`financial_analysis.log`).
 
 ## 🤝 Contributing
 
@@ -258,4 +258,4 @@ For support and questions:
 
 ---
 
-**Made with ❤️ by the Trial Balance Extractor Team**
+**Made with ❤️ by the Financial Analysis Team**

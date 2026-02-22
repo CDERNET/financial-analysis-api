@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
     # API Configuration
-    api_title: str = "Trial Balance Extractor API"
+    api_title: str = "Financial Analysis API"
     api_description: str = "Mizan PDF/Excel veri çıkarımı ve GIB beyanname PDF parse servisi"
     api_version: str = "2.0.0"
     api_host: str = Field(default="0.0.0.0", env="API_HOST")

@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: trial-balance-service
+  name: financial-analysis-service
   labels:
-    app: trial-balance-extractor
+    app: financial-analysis
 spec:
   type: LoadBalancer  # External access or ClusterIP
   ports:
@@ -11,4 +11,4 @@ spec:
     targetPort: 8000
     protocol: TCP
   selector:
-    app: trial-balance-extractor
+    app: financial-analysis
