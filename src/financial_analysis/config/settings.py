@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Database Configuration
-    database_url: Optional[str] = Field(default=None, env="DATABASE_URL")
+    database_url: Optional[str] = Field(
+        default="postgresql://postgres:xuAw6ZnolXFWfZHOuD2v@192.168.21.10:5432/FinancialRuleEngine",
+        env="DATABASE_URL",
+    )
     db_pool_min_size: int = Field(default=2, env="DB_POOL_MIN_SIZE")
     db_pool_max_size: int = Field(default=10, env="DB_POOL_MAX_SIZE")
 

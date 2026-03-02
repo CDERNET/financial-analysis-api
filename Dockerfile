@@ -27,8 +27,9 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and init scripts
 COPY src/ ./src/
+COPY docker/ ./docker/
 COPY README.md .
 
 # Create logs and data directories
