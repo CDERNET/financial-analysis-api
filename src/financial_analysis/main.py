@@ -35,19 +35,23 @@ def setup_logging():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan context manager.
-    
-    Args:
-        app: FastAPI application instance
-    """
-    # Startup
+    """Application lifespan context manager."""
     logger = logging.getLogger(__name__)
     logger.info("Starting Financial Analysis API...")
 
+    from .db import init_db_pool, close_db_pool, get_db_pool, seed_item_definitions
+    await init_db_pool()
+
+    pool = get_db_pool()
+    if pool:
+        try:
+            await seed_item_definitions(pool)
+        except Exception as e:
+            logger.error(f"Failed to seed item definitions: {e}")
+
     yield
 
-    # Shutdown
+    await close_db_pool()
     logger.info("Shutting down Financial Analysis API...")
 
 
@@ -118,16 +122,24 @@ def root():
 
 # Health check endpoint
 @app.get("/health", summary="Health check endpoint", description="Application health status")
-def health_check():
-    """
-    Health check endpoint for monitoring.
-    
-    Returns:
-        Health status information
-    """
+async def health_check():
+    """Health check endpoint for monitoring."""
+    from .db import get_db_pool
+
+    db_status = "not_configured"
+    pool = get_db_pool()
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            db_status = "connected"
+        except Exception:
+            db_status = "error"
+
     return {
         "status": "healthy",
         "message": "Financial Analysis API is running",
+        "database": db_status,
         "timestamp": datetime.utcnow().isoformat() + "Z"
     }
 

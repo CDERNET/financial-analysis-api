@@ -2,13 +2,16 @@
 
 import logging
 from datetime import datetime
+from typing import Optional
 
-from fastapi import APIRouter, File, Form, UploadFile, HTTPException
+from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Depends
 
 from ..config import get_settings
 from ..models.schemas import ProcessingResult
 from ..services import ExcelProcessor, PDFProcessor
 from ..utils.validators import validate_file_extension, validate_file_size, validate_account_parameters
+from ..db.dependencies import get_repository
+from ..db.repository import FinancialStatementRepository
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +38,8 @@ async def excel_file(
     ),
     separator: str = Form(".", description="Account hierarchy separator", example="."),
     account_number: str = Form("", description="Customer/Account number (optional)"),
-    period_id: str = Form("", description="Period identifier (optional)")
+    period_id: str = Form("", description="Period identifier (optional)"),
+    repo: Optional[FinancialStatementRepository] = Depends(get_repository),
 ) -> ProcessingResult:
     """
     Process Excel file and return extracted trial balance data.
@@ -103,6 +107,14 @@ async def excel_file(
             period_id=parsed_period_id
         )
 
+        # Insert into database
+        if repo and result.success and result.data:
+            try:
+                count = await repo.insert_mizan_items(result.data)
+                logger.info(f"Inserted {count} mizan records into database")
+            except Exception as e:
+                logger.error(f"Database insertion failed for mizan excel: {e}")
+
         end_time = datetime.now()
         elapsed_time = (end_time - start_time).total_seconds()
         logger.info(f"Excel processing completed in {elapsed_time:.2f} seconds")
@@ -131,7 +143,8 @@ async def pdf_file(
     ),
     separator: str = Form(".", description="Account hierarchy separator", example="."),
     account_number: str = Form("", description="Customer/Account number (optional)"),
-    period_id: str = Form("", description="Period identifier (optional)")
+    period_id: str = Form("", description="Period identifier (optional)"),
+    repo: Optional[FinancialStatementRepository] = Depends(get_repository),
 ) -> ProcessingResult:
     """
     Process PDF file and return extracted trial balance data.
@@ -197,6 +210,14 @@ async def pdf_file(
             account_number=parsed_account_number,
             period_id=parsed_period_id
         )
+
+        # Insert into database
+        if repo and result.success and result.data:
+            try:
+                count = await repo.insert_mizan_items(result.data)
+                logger.info(f"Inserted {count} mizan records into database")
+            except Exception as e:
+                logger.error(f"Database insertion failed for mizan pdf: {e}")
 
         end_time = datetime.now()
         elapsed_time = (end_time - start_time).total_seconds()

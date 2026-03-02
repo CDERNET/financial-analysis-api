@@ -11,10 +11,14 @@ services:
       - API_HOST=0.0.0.0
       - API_PORT=8000
       - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/FinancialRuleEngine
     volumes:
       - ./logs:/app/logs
     networks:
       - financial-analysis-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -22,6 +26,31 @@ services:
       timeout: 10s
       retries: 3
 
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: financial-analysis-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: FinancialRuleEngine
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - financial-analysis-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d FinancialRuleEngine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   financial-analysis-network:
     driver: bridge
+
+volumes:
+  pgdata:
