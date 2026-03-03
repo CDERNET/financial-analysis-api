@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 
 from ..services import BeyannameParser
@@ -103,3 +103,38 @@ async def get_definitions_tree(
         except Exception as e:
             logger.error(f"Failed to fetch definitions tree from DB: {e}")
     return JSONResponse(content=BeyannameParser.get_definitions_tree())
+
+
+@router.get(
+    "/tree",
+    summary="Beyanname verilerini hiyerarşik ağaç olarak getir",
+    description="Belirtilen IdentityNumber ve Period için FinancialStatement verilerini "
+                "FinancialStatementItemDefinition tablosundaki ParentCode üzerinden tree olarak döner"
+)
+async def get_beyanname_tree(
+    identity_number: str = Query(..., description="Vergi kimlik numarası", example="2100009755"),
+    period: int = Query(..., description="6 haneli dönem (YYYYQT)", example=202442),
+    repo: Optional[FinancialStatementRepository] = Depends(get_repository),
+):
+    """Return beyanname data as a parent-child tree joined with item definitions."""
+    if not repo:
+        raise HTTPException(
+            status_code=503,
+            detail="Veritabanı bağlantısı yapılandırılmamış."
+        )
+    try:
+        tree = await repo.get_beyanname_tree(
+            identity_number=identity_number,
+            period=period,
+        )
+    except Exception as e:
+        logger.error(f"Beyanname tree fetch error: {e}")
+        raise HTTPException(status_code=500, detail=f"Beyanname tree getirilemedi: {e}")
+
+    if not tree:
+        raise HTTPException(
+            status_code=404,
+            detail=f"IdentityNumber={identity_number}, Period={period} için kayıt bulunamadı."
+        )
+
+    return JSONResponse(content=tree)

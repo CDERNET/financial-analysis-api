@@ -107,6 +107,94 @@ class FinancialStatementRepository:
 
         return roots
 
+    async def get_beyanname_tree(
+        self,
+        identity_number: str,
+        period: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch FinancialStatement rows joined with FinancialStatementItemDefinition
+        to get ParentCode, then build parent-child tree."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT '
+                '  fs."Code", '
+                '  fs."OriginalValue", '
+                '  fs."CorrectedValue", '
+                '  def."Name", '
+                '  def."ParentCode", '
+                '  def."SequenceNumber", '
+                '  def."IsLeaf", '
+                '  def."BalanceSheet" '
+                'FROM public."FinancialStatement" fs '
+                'LEFT JOIN public."FinancialStatementItemDefinition" def '
+                '  ON fs."Code" = def."Code" '
+                'WHERE fs."IdentityNumber" = $1 AND fs."Period" = $2 '
+                'ORDER BY def."SequenceNumber", fs."Code"',
+                identity_number,
+                period,
+            )
+
+        if not rows:
+            return []
+
+        by_code: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            node = dict(r)
+            node["OriginalValue"] = float(node["OriginalValue"])
+            node["CorrectedValue"] = float(node["CorrectedValue"])
+            node["children"] = []
+            by_code[node["Code"]] = node
+
+        roots: List[Dict[str, Any]] = []
+        for node in by_code.values():
+            parent = node.get("ParentCode")
+            if parent and parent in by_code:
+                by_code[parent]["children"].append(node)
+            else:
+                roots.append(node)
+
+        return roots
+
+    async def get_mizan_detail_tree(
+        self,
+        identity_number: str,
+        period: int,
+    ) -> List[Dict[str, Any]]:
+        """Fetch FinancialStatementDetail rows and return as parent-child tree."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                'SELECT "Code", "Description", "ParentCode", '
+                '"Debit", "Credit", "DebitBalance", "CreditBalance" '
+                'FROM public."FinancialStatementDetail" '
+                'WHERE "IdentityNumber" = $1 AND "Period" = $2 '
+                'ORDER BY "Code"',
+                identity_number,
+                period,
+            )
+
+        if not rows:
+            return []
+
+        by_code: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            node = dict(r)
+            node["Debit"] = float(node["Debit"])
+            node["Credit"] = float(node["Credit"])
+            node["DebitBalance"] = float(node["DebitBalance"]) if node["DebitBalance"] is not None else None
+            node["CreditBalance"] = float(node["CreditBalance"]) if node["CreditBalance"] is not None else None
+            node["children"] = []
+            by_code[node["Code"]] = node
+
+        roots: List[Dict[str, Any]] = []
+        for node in by_code.values():
+            parent = node.get("ParentCode")
+            if parent and parent in by_code:
+                by_code[parent]["children"].append(node)
+            else:
+                roots.append(node)
+
+        return roots
+
     async def insert_mizan_items(
         self,
         items: List[Dict[str, Any]],

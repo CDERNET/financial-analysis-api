@@ -4,7 +4,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Depends
+from fastapi import APIRouter, File, Form, UploadFile, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 
 from ..config import get_settings
 from ..models.schemas import ProcessingResult
@@ -230,3 +231,38 @@ async def pdf_file(
     except Exception as e:
         logger.error(f"PDF processing error: {e}")
         raise HTTPException(status_code=500, detail=f"PDF processing failed: {e}")
+
+
+@router.get(
+    "/tree",
+    summary="Mizan verilerini hiyerarşik ağaç olarak getir",
+    description="Belirtilen IdentityNumber ve Period için FinancialStatementDetail "
+                "tablosundaki mizan verilerini ParentCode → Code ilişkisiyle tree olarak döner"
+)
+async def get_mizan_tree(
+    identity_number: str = Query(..., description="Vergi kimlik numarası", example="2100009755"),
+    period: int = Query(..., description="6 haneli dönem (YYYYQT)", example=202442),
+    repo: Optional[FinancialStatementRepository] = Depends(get_repository),
+):
+    """Return trial balance detail as a parent-child tree from the database."""
+    if not repo:
+        raise HTTPException(
+            status_code=503,
+            detail="Veritabanı bağlantısı yapılandırılmamış."
+        )
+    try:
+        tree = await repo.get_mizan_detail_tree(
+            identity_number=identity_number,
+            period=period,
+        )
+    except Exception as e:
+        logger.error(f"Mizan tree fetch error: {e}")
+        raise HTTPException(status_code=500, detail=f"Mizan tree getirilemedi: {e}")
+
+    if not tree:
+        raise HTTPException(
+            status_code=404,
+            detail=f"IdentityNumber={identity_number}, Period={period} için kayıt bulunamadı."
+        )
+
+    return JSONResponse(content=tree)
